@@ -34,6 +34,17 @@ class Config:
     
     # CORS - Allowed origins for frontend
     ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    
+    # Frontend URL (for OAuth redirects)
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    
+    # Google OAuth
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    
+    # JWT Authentication
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-in-production-min-32-chars")
+    SESSION_EXPIRE_HOURS = int(os.getenv("SESSION_EXPIRE_HOURS", "168"))  # 7 days
 
     @classmethod
     def validate(cls):

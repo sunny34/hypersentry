@@ -75,4 +75,11 @@ psycopg2-binary==2.9.9
 celery==5.3.6
 redis==5.0.1
 
+# Database ORM
+sqlalchemy==2.0.25
 
+# JWT Authentication
+python-jose[cryptography]==3.3.0
+
+# HTTP client for OAuth
+httpx==0.28.1

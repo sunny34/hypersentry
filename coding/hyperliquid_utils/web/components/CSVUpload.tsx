@@ -3,11 +3,13 @@ import { useState, useCallback } from 'react';
 import { Upload, FileText, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 // API Base URL - configured via environment variable for production
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function CSVUpload({ onUploadComplete }: { onUploadComplete: () => void }) {
+    const { token } = useAuth();
     const [isDragging, setIsDragging] = useState(false);
     const [file, setFile] = useState<File | null>(null);
     const [status, setStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
@@ -50,7 +52,10 @@ export default function CSVUpload({ onUploadComplete }: { onUploadComplete: () =
 
         try {
             const res = await axios.post(`${API_URL}/wallets/upload_csv`, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {})
+                },
             });
             setCount(res.data.count);
             setStatus('success');
