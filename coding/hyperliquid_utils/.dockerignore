@@ -1,0 +1,39 @@
+# Dependencies
+venv/
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Build artifacts
+.next/
+dist/
+build/
+*.egg-info/
+
+# Local data
+wallets.json
+twaps.json
+*.csv
+
+# Docs
+*.md
+!README.md
+
+# Test files
+test_*.py
+*_test.py
+.pytest_cache/
