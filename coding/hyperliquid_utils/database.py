@@ -12,30 +12,53 @@ from models import Base
 
 logger = logging.getLogger(__name__)
 
-# Get database URL from environment
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://localhost:5432/hypersentry")
+# Database engine (lazily initialized)
+_engine = None
+_SessionLocal = None
 
-# Fix for SQLAlchemy - Railway uses postgres:// but SQLAlchemy needs postgresql://
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Create engine
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,  # Check connection health before using
-    pool_size=10,
-    max_overflow=20,
-    echo=os.getenv("SQL_DEBUG", "false").lower() == "true"
-)
+def get_database_url():
+    """Get and normalize the database URL"""
+    url = os.getenv("DATABASE_URL", "")
+    if not url:
+        return None
+    # Fix for SQLAlchemy - Railway uses postgres:// but SQLAlchemy needs postgresql://
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return url
 
-# Session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_engine():
+    """Get or create the database engine"""
+    global _engine
+    if _engine is None:
+        database_url = get_database_url()
+        if not database_url:
+            raise RuntimeError("DATABASE_URL environment variable is not set")
+        
+        _engine = create_engine(
+            database_url,
+            pool_pre_ping=True,  # Check connection health before using
+            pool_size=10,
+            max_overflow=20,
+            echo=os.getenv("SQL_DEBUG", "false").lower() == "true"
+        )
+    return _engine
+
+
+def get_session_factory():
+    """Get or create the session factory"""
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
+    return _SessionLocal
 
 
 def init_db():
     """Create all tables if they don't exist"""
     logger.info("🗄️ Initializing database tables...")
     try:
+        engine = get_engine()
         Base.metadata.create_all(bind=engine)
         logger.info("✅ Database tables ready")
     except Exception as e:
@@ -45,6 +68,7 @@ def init_db():
 
 def get_db():
     """FastAPI dependency for database sessions"""
+    SessionLocal = get_session_factory()
     db = SessionLocal()
     try:
         yield db
@@ -55,6 +79,7 @@ def get_db():
 @contextmanager
 def get_db_session():
     """Context manager for database sessions (for use outside FastAPI)"""
+    SessionLocal = get_session_factory()
     db = SessionLocal()
     try:
         yield db

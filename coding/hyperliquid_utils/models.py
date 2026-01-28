@@ -55,11 +55,6 @@ class Wallet(Base):
     # Relationship
     user = relationship("User", back_populates="wallets")
 
-    # Unique constraint: one wallet per user
-    __table_args__ = (
-        {"postgresql_concurrently": False},  # For unique constraint
-    )
-
     def to_dict(self):
         return {
             "id": str(self.id),
