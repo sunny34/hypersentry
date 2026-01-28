@@ -4,7 +4,7 @@ import os
 from urllib.parse import urlencode
 import colorlog
 import uvicorn
-from fastapi import FastAPI, UploadFile, BackgroundTasks, Depends, Query, Response
+from fastapi import FastAPI, UploadFile, BackgroundTasks, Depends, Query, Response, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -19,6 +19,7 @@ from auth import (
     GOOGLE_CLIENT_ID, FRONTEND_URL
 )
 from src.manager import TraderManager
+from src.strategies.bridge_monitor import BridgeMonitor
 
 # Configure Colored Logging
 handler = colorlog.StreamHandler()
@@ -52,6 +53,13 @@ async def lifespan(app: FastAPI):
     config.validate()
     manager = TraderManager() # Init singleton
     
+    # Initialize Bridge Monitor
+    from src.notifications import TelegramBot
+    telegram_bot = TelegramBot()
+    bridge_threshold = float(os.getenv("BRIDGE_ALERT_THRESHOLD", "3000000"))
+    bridge_monitor = BridgeMonitor(telegram_bot, min_amount_usd=bridge_threshold)
+    app.state.bridge_monitor = bridge_monitor  # Store for API access
+    
     # Start restoring wallets in background
     import asyncio
     async def background_restore():
@@ -64,9 +72,13 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(background_restore())
     
+    # Start bridge monitor in background
+    asyncio.create_task(bridge_monitor.start())
+    
     yield
     # Shutdown
     logger.info("🛑 Shutting down manager...")
+    bridge_monitor.stop()
     await manager.stop_all()
 
 app = FastAPI(
@@ -367,6 +379,80 @@ async def remove_twap(
     if deleted:
         return {"status": "removed", "token": token.upper()}
     return {"status": "not_found", "token": token.upper()}
+
+
+@app.get("/twap/history/{token}")
+async def get_twap_history(
+    token: str,
+    time_range: str = Query("1h", description="Time range: 1h, 4h, 24h, or all"),
+    user: User = Depends(require_user)
+):
+    """Get TWAP history data for charting."""
+    history = manager.twap_detector.get_history(token, time_range)
+    return {
+        "token": token.upper(),
+        "time_range": time_range,
+        "data": history,
+        "count": len(history)
+    }
+
+
+@app.get("/twap/users/{token}")
+async def get_twap_users(
+    token: str,
+    user: User = Depends(require_user)
+):
+    """Get active TWAP users (who is doing the TWAP)."""
+    users = manager.twap_detector.get_active_users(token)
+    return {
+        "token": token.upper(),
+        "buyers": users["buyers"],
+        "sellers": users["sellers"],
+        "total_buyers": len(users["buyers"]),
+        "total_sellers": len(users["sellers"])
+    }
+
+
+@app.get("/twap/summary")
+async def get_twap_summary(user: User = Depends(require_user)):
+    """Get summary of all watched tokens with latest TWAP data."""
+    summaries = manager.twap_detector.get_all_tokens_summary()
+    return {"tokens": summaries}
+
+
+# ============================================
+# Bridge Monitoring Endpoints
+# ============================================
+
+@app.get("/bridges/recent")
+async def get_recent_bridges(
+    limit: int = Query(20, description="Number of bridges to return"),
+    request: Request = None
+):
+    """Get recent large bridge deposits."""
+    bridge_monitor = request.app.state.bridge_monitor
+    bridges = bridge_monitor.get_recent_bridges(limit)
+    return {"bridges": bridges, "count": len(bridges)}
+
+
+@app.get("/bridges/stats")
+async def get_bridge_stats(request: Request = None):
+    """Get bridge monitor stats."""
+    bridge_monitor = request.app.state.bridge_monitor
+    stats = bridge_monitor.get_stats()
+    return stats
+
+
+@app.post("/bridges/config")
+async def update_bridge_config(
+    threshold: float = Query(..., description="Minimum bridge amount in USD"),
+    user: User = Depends(require_user),
+    request: Request = None
+):
+    """Update bridge alert threshold."""
+    bridge_monitor = request.app.state.bridge_monitor
+    bridge_monitor.set_threshold(threshold)
+    return {"status": "updated", "threshold": threshold}
 
 # ============================================
 # CSV Import (User-Scoped)
