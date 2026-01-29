@@ -71,12 +71,14 @@ export default function Home() {
   }, [authLoading, fetchStats]);
 
   const deleteWallet = async (addr: string) => {
+    if (!isAuthenticated) return login('google');
     await axios.delete(`${API_URL}/wallets/${addr}`, getAuthConfig());
     fetchStats();
   };
 
   const addWallet = async (e: any) => {
     e.preventDefault();
+    if (!isAuthenticated) return login('google');
     const addr = e.target.addr.value;
     const label = e.target.label.value;
     const isTrading = e.target.mode.checked;
@@ -87,6 +89,7 @@ export default function Home() {
 
   const addTwap = async (e: any) => {
     e.preventDefault();
+    if (!isAuthenticated) return login('google');
     const tokenValue = e.target.token.value;
     await axios.post(`${API_URL}/twap/add`, { token: tokenValue }, getAuthConfig());
     e.target.reset();
@@ -94,12 +97,14 @@ export default function Home() {
   };
 
   const removeTwap = async (tokenToRemove: string) => {
+    if (!isAuthenticated) return login('google');
     await axios.delete(`${API_URL}/twap/${tokenToRemove}`, getAuthConfig());
     fetchStats();
   };
 
   const updateMinSize = async (e: any) => {
     e.preventDefault();
+    if (!isAuthenticated) return login('google');
     const size = parseFloat(e.target.size.value);
     await axios.post(`${API_URL}/twap/config`, { min_size: size }, getAuthConfig());
     fetchStats();
