@@ -203,6 +203,23 @@ async def get_me(user: User = Depends(require_user)):
     return user.to_dict()
 
 
+class UpdateProfileRequest(BaseModel):
+    telegram_chat_id: str
+
+
+@app.post("/auth/profile/update")
+async def update_profile(
+    req: UpdateProfileRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db)
+):
+    """Update user profile settings"""
+    user.telegram_chat_id = req.telegram_chat_id
+    db.commit()
+    db.refresh(user)
+    return {"status": "updated", "user": user.to_dict()}
+
+
 @app.post("/auth/logout")
 async def logout(user: User = Depends(require_user)):
     """Logout current user (client should discard token)"""

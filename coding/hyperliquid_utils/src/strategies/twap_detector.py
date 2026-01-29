@@ -1,10 +1,13 @@
 import asyncio
 import logging
 import aiohttp
-from typing import List, Set, Dict
+from typing import List, Set, Dict, Optional
 from datetime import datetime
 from collections import deque
+from sqlalchemy.orm import Session
 from src.notifications import TelegramBot
+from models import User, UserTwap
+from database import SessionLocal
 
 logger = logging.getLogger("TwapDetector")
 
@@ -120,37 +123,56 @@ class TwapDetector:
         self._record_history(token, buy_total, sell_total, net_delta, 
                            len(active_large_twaps), users_buy, users_sell)
         
-        # Alerting Logic (only for new ones)
+        # Alerting Logic (Targeted per user)
         for item in active_large_twaps:
             tx_hash = item['hash']
             if tx_hash in self.seen_hashes:
                 continue
-            twap = item['action']['twap']
-            tx_hash = item['hash']
-            user = item['user']
-            
-            is_buy = twap.get('b', False)
-            size = float(twap.get('s', 0))
-            minutes = twap.get('m', 0)
             
             # Mark seen
             self.seen_hashes.add(tx_hash)
             
-            # Format Alert
-            side_str = "🟢 BUY" if is_buy else "🔴 SELL"
+            twap = item['action']['twap']
+            user_addr = item['user']
+            is_buy = twap.get('b', False)
+            size = float(twap.get('s', 0))
+            minutes = twap.get('m', 0)
             
-            msg = (
-                f"🚨 <b>Large TWAP Detected</b>\n\n"
-                f"{side_str} <b>{token}</b>\n"
-                f"📦 <b>Size:</b> ${size:,.0f}\n"
-                f"⏱️ <b>Duration:</b> {minutes} mins\n"
-                f"👤 <b>User:</b> `{user[:6]}...{user[-4:]}`\n"
-                f"━━━━━━━━━━━━\n"
-                f"<a href='https://hypurrscan.io/tx/{tx_hash}'>View on HypurrScan</a>"
-            )
-            
-            await self.notifier.send_message(msg)
-            logger.info(f"Reported TWAP: {token} ${size} ({side_str})")
+            # Find users watching this token
+            try:
+                with SessionLocal() as db:
+                    interested_users = db.query(User, UserTwap).join(UserTwap).filter(
+                        UserTwap.token == token.upper(),
+                        UserTwap.min_size <= size
+                    ).all()
+                    
+                    if not interested_users:
+                        # Fallback for old system or if no users found but token is watched globally
+                        # (Optional: remove this if you want purely user-based alerts)
+                        pass
+                    
+                    for user, user_twap in interested_users:
+                        if not user.telegram_chat_id:
+                            continue
+                            
+                        # Format Alert
+                        side_str = "🟢 BUY" if is_buy else "🔴 SELL"
+                        msg = (
+                            f"🚨 <b>Large TWAP Detected</b>\n\n"
+                            f"{side_str} <b>{token}</b>\n"
+                            f"📦 <b>Size:</b> ${size:,.0f}\n"
+                            f"⏱️ <b>Duration:</b> {minutes} mins\n"
+                            f"👤 <b>User:</b> `{user_addr[:6]}...{user_addr[-4:]}`\n"
+                            f"━━━━━━━━━━━━\n"
+                            f"<a href='https://hypurrscan.io/tx/{tx_hash}'>View on HypurrScan</a>"
+                        )
+                        
+                        # Send to specific user
+                        await self.notifier.send_message(msg, chat_id=user.telegram_chat_id)
+                        logger.info(f"Reported TWAP to {user.email}: {token} ${size}")
+                        
+            except Exception as e:
+                logger.error(f"Failed to process alerts for {token}: {e}")
 
     def add_token(self, token: str):
         self.watched_tokens.add(token.upper())

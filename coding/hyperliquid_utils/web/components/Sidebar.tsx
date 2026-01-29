@@ -10,7 +10,24 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ view, setView, onImport, onAdd }: SidebarProps) {
-    const { user, isAuthenticated, logout, isLoading } = useAuth();
+    const { user, isAuthenticated, logout, isLoading, token } = useAuth();
+    const [showTelegram, setShowTelegram] = useState(false);
+    const [chatId, setChatId] = useState('');
+
+    const saveTelegram = async (e: any) => {
+        e.preventDefault();
+        try {
+            await axios.post(
+                `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/auth/profile/update`,
+                { telegram_chat_id: chatId },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            setShowTelegram(false);
+            window.location.reload(); // Reload to refresh user context
+        } catch (err) {
+            console.error(err);
+        }
+    };
 
     return (
         <div className="w-64 border-r border-gray-800 h-screen fixed left-0 top-0 bg-black/95 backdrop-blur-xl flex flex-col z-50">
@@ -84,7 +101,12 @@ export default function Sidebar({ view, setView, onImport, onAdd }: SidebarProps
                             )}
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold text-white truncate">{user.name}</p>
-                                <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                                <p className="text-xs text-gray-500 truncate" onClick={() => {
+                                    setChatId(user.telegram_chat_id || '');
+                                    setShowTelegram(true);
+                                }}>
+                                    {user.telegram_chat_id ? '📱 Connected' : '🔗 Connect Telegram'}
+                                </p>
                             </div>
                         </div>
                         <button
@@ -94,6 +116,31 @@ export default function Sidebar({ view, setView, onImport, onAdd }: SidebarProps
                             <LogOut className="w-4 h-4" />
                             Sign Out
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Telegram Modal */}
+            {showTelegram && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4" onClick={() => setShowTelegram(false)}>
+                    <div className="bg-gradient-to-br from-gray-900 to-gray-950 border border-gray-800 rounded-3xl p-8 w-full max-w-sm relative animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-xl font-bold mb-4 text-white">Connect Telegram</h3>
+                        <p className="text-sm text-gray-400 mb-6">
+                            1. Start a chat with <a href="https://t.me/getmyid_bot" target="_blank" className="text-blue-400 hover:underline">@getmyid_bot</a><br />
+                            2. Copy your "Current Chat ID"<br />
+                            3. Paste it below
+                        </p>
+                        <form onSubmit={saveTelegram} className="space-y-4">
+                            <input
+                                value={chatId}
+                                onChange={e => setChatId(e.target.value)}
+                                placeholder="e.g. 123456789"
+                                className="w-full bg-black/50 border border-gray-700 rounded-xl p-3 text-white focus:border-green-500 outline-none"
+                            />
+                            <button type="submit" className="w-full py-3 bg-green-600 hover:bg-green-500 text-black font-bold rounded-xl transition">
+                                Save Chat ID
+                            </button>
+                        </form>
                     </div>
                 </div>
             )}

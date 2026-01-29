@@ -21,6 +21,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     name = Column(String(255))
     avatar_url = Column(Text)
+    telegram_chat_id = Column(String(255), nullable=True)  # User's personal TG Chat ID
     provider = Column(String(50), nullable=False)  # 'google' or 'twitter'
     provider_id = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -36,6 +37,7 @@ class User(Base):
             "email": self.email,
             "name": self.name,
             "avatar_url": self.avatar_url,
+            "telegram_chat_id": self.telegram_chat_id,
             "provider": self.provider,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }

@@ -21,17 +21,19 @@ class TelegramBot:
         else:
             logging.warning("Telegram credentials missing. Alerts will be disabled.")
 
-    async def send_message(self, message: str):
+    async def send_message(self, message: str, chat_id: str = None):
         """
-        Send a text message to the configured chat ID.
+        Send a text message to the specific chat ID or default admin.
         """
-        if not self.bot or not self.chat_id:
+        target_id = chat_id or self.chat_id
+        
+        if not self.bot or not target_id:
             logging.debug(f"Alert (Not Sent): {message}")
             return
 
         for attempt in range(3):
             try:
-                await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode='HTML', disable_web_page_preview=True)
+                await self.bot.send_message(chat_id=target_id, text=message, parse_mode='HTML', disable_web_page_preview=True)
                 return
             except (TimedOut, NetworkError) as e:
                 logging.warning(f"Telegram Timed Out (Attempt {attempt+1}/3): {e}")
