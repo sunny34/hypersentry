@@ -76,12 +76,19 @@ def restore_wallet_task(self, address: str, label: str = None, active_trading: b
 def add_wallet_task(self, address: str, label: str = None, active_trading: bool = False):
     """
     Add a single wallet via API. Handled by Celery worker for parallelism.
+    Uses 'API_URL' env var or defaults to localhost.
     """
     import requests
     import time
+    import os
+    
+    # Use RAILWAY_PUBLIC_DOMAIN if API_URL isn't set, or default to localhost
+    api_url = os.getenv("API_URL", "http://127.0.0.1:8000").rstrip("/")
+    if "https://" not in api_url and "http://" not in api_url:
+        api_url = f"https://{api_url}"
     
     try:
-        res = requests.post("http://127.0.0.1:8000/wallets/add", json={
+        res = requests.post(f"{api_url}/wallets/add", json={
             "address": address,
             "label": label,
             "active_trading": active_trading
@@ -90,10 +97,11 @@ def add_wallet_task(self, address: str, label: str = None, active_trading: bool 
         if res.status_code == 200:
             return {"address": address, "status": "added"}
         else:
+            logger.error(f"API returned {res.status_code}: {res.text}")
             return {"address": address, "status": "failed", "code": res.status_code}
             
     except Exception as e:
-        logger.error(f"Failed to add {address}: {e}")
+        logger.error(f"Failed to add {address} to {api_url}: {e}")
         if "429" in str(e) or "Connection" in str(e):
             time.sleep(2)
             raise self.retry(exc=e)
