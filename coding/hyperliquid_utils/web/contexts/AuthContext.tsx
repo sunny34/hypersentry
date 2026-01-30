@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     // Initiate OAuth login
-    const login = async (provider: 'google') => {
+    const login = useCallback(async (provider: 'google') => {
         try {
             const redirectUri = `${window.location.origin}/auth/callback`;
             const response = await axios.get(`${API_URL}/auth/${provider}`, {
@@ -76,10 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (error) {
             console.error('Login failed:', error);
         }
-    };
+    }, []);
 
     // Handle OAuth callback
-    const handleCallback = async (code: string, redirectUri: string) => {
+    const handleCallback = useCallback(async (code: string, redirectUri: string) => {
         try {
             setIsLoading(true);
             const response = await axios.get(`${API_URL}/auth/google/callback`, {
@@ -98,10 +98,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, []);
 
     // Logout
-    const logout = async () => {
+    const logout = useCallback(async () => {
         try {
             if (token) {
                 await axios.post(`${API_URL}/auth/logout`, {}, {
@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setToken(null);
             setUser(null);
         }
-    };
+    }, [token]);
 
     return (
         <AuthContext.Provider

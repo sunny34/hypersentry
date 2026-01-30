@@ -175,6 +175,8 @@ def get_or_create_user(db: Session, email: str, name: str, avatar_url: str, prov
 
 def get_google_auth_url(redirect_uri: str) -> str:
     """Generate Google OAuth authorization URL"""
+    from urllib.parse import urlencode
+    
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": redirect_uri,
@@ -183,5 +185,4 @@ def get_google_auth_url(redirect_uri: str) -> str:
         "access_type": "offline",
         "prompt": "consent"
     }
-    query_string = "&".join(f"{k}={v}" for k, v in params.items())
-    return f"https://accounts.google.com/o/oauth2/v2/auth?{query_string}"
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
