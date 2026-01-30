@@ -36,12 +36,22 @@ def get_engine():
         if not database_url:
             raise RuntimeError("DATABASE_URL environment variable is not set")
         
+        if "sqlite" in database_url:
+            connect_args = {"check_same_thread": False}
+            pool_kwargs = {} # SQLite has different pooling
+        else:
+            connect_args = {}
+            pool_kwargs = {
+                "pool_pre_ping": True,
+                "pool_size": 10,
+                "max_overflow": 20,
+            }
+
         _engine = create_engine(
             database_url,
-            pool_pre_ping=True,  # Check connection health before using
-            pool_size=10,
-            max_overflow=20,
-            echo=os.getenv("SQL_DEBUG", "false").lower() == "true"
+            connect_args=connect_args,
+            echo=os.getenv("SQL_DEBUG", "false").lower() == "true",
+            **pool_kwargs
         )
     return _engine
 

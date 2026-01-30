@@ -10,6 +10,7 @@ interface User {
     email: string;
     name: string;
     avatar_url?: string;
+    telegram_chat_id?: string;
     provider: string;
     created_at: string;
 }
@@ -34,11 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Check for existing token on mount
     useEffect(() => {
         const storedToken = localStorage.getItem('auth_token');
-        if (storedToken) {
+        if (storedToken && storedToken !== 'undefined' && storedToken !== 'null') {
             setToken(storedToken);
             fetchUser(storedToken);
         } else {
             setIsLoading(false);
+            if (storedToken) localStorage.removeItem('auth_token');
         }
     }, []);
 

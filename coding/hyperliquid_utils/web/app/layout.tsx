@@ -18,6 +18,9 @@ export const metadata: Metadata = {
   description: "Real-time Hyperliquid trading intelligence platform",
 };
 
+import { Providers } from './providers';
+import { SidebarProvider } from '@/contexts/SidebarContext';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -27,9 +30,14 @@ export default function RootLayout({
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning
       >
         <AuthProvider>
-          {children}
+          <SidebarProvider>
+            <Providers>
+              {children}
+            </Providers>
+          </SidebarProvider>
         </AuthProvider>
       </body>
     </html>

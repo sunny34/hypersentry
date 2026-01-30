@@ -7,6 +7,9 @@ import CSVUpload from '@/components/CSVUpload';
 import Sidebar from '@/components/Sidebar';
 import BridgeAlerts from '@/components/BridgeAlerts';
 import { useAuth } from '@/contexts/AuthContext';
+import ActiveTwapsTable from '@/components/ActiveTwapsTable';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useSidebar } from '@/contexts/SidebarContext';
 
 // API Base URL - configured via environment variable for production
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -21,6 +24,7 @@ interface Stats {
 export default function Home() {
   const router = useRouter();
   const { user, token, isAuthenticated, isLoading: authLoading, login } = useAuth();
+  const { isCollapsed } = useSidebar();
   const [stats, setStats] = useState<Stats>({ active_wallets: 0, status: 'unknown' });
   const [wallets, setWallets] = useState([]);
   const [twaps, setTwaps] = useState([]);
@@ -28,6 +32,7 @@ export default function Home() {
   const [minSize, setMinSize] = useState(0);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showAllTwaps, setShowAllTwaps] = useState(false);
   const [view, setView] = useState('dashboard');
 
   // Create axios config with auth header
@@ -48,7 +53,7 @@ export default function Home() {
         setWallets(res2.data.wallets || []);
         const res3 = await axios.get(`${API_URL}/twap`, config);
         setTwaps(res3.data.tokens || []);
-        const res4 = await axios.get(`${API_URL}/twap/active`, config);
+        const res4 = await axios.get(`${API_URL}/twap/active?show_all=${showAllTwaps}`, config);
         setActiveTwaps(res4.data.twaps || []);
         setMinSize(res4.data.min_size || 10000);
       } else {
@@ -60,7 +65,7 @@ export default function Home() {
     } catch (e) {
       setStats(prev => ({ ...prev, status: 'offline' }));
     }
-  }, [isAuthenticated, token, getAuthConfig]);
+  }, [isAuthenticated, token, getAuthConfig, showAllTwaps]);
 
   useEffect(() => {
     if (!authLoading) {
@@ -147,7 +152,7 @@ export default function Home() {
         onAdd={() => setShowAdd(true)}
       />
 
-      <main className="flex-1 ml-64 p-8 overflow-y-auto">
+      <main className={`flex-1 p-8 overflow-y-auto transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
         {/* Top Bar */}
         <header className="flex justify-between items-center mb-10">
           <div>
@@ -159,22 +164,19 @@ export default function Home() {
 
           <div className="flex items-center gap-4">
             {/* Login/User Button */}
-            {!isAuthenticated ? (
-              <button
-                onClick={() => login('google')}
-                className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-full font-bold text-sm hover:bg-gray-200 transition"
-              >
-                <Zap className="w-4 h-4 text-emerald-600 fill-current" />
-                Sign in
-              </button>
-            ) : user && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-full border border-gray-700">
-                <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-xs font-bold text-emerald-400">
-                  {user.name ? user.name[0].toUpperCase() : 'U'}
-                </div>
-                <span className="text-sm text-gray-300 font-medium">{user.name}</span>
-              </div>
-            )}
+            <div className="flex items-center gap-4">
+              <ConnectButton />
+
+              {!isAuthenticated && (
+                <button
+                  onClick={() => login('google')}
+                  className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-full font-bold text-sm hover:bg-gray-200 transition"
+                >
+                  <Zap className="w-4 h-4 text-emerald-600 fill-current" />
+                  Sign in
+                </button>
+              )}
+            </div>
 
             {/* Status Indicator */}
             <div className={`flex items-center gap-3 text-sm font-semibold px-5 py-2.5 rounded-full border backdrop-blur-xl shadow-lg transition-all duration-300 ${stats.status === 'loading'
@@ -389,57 +391,29 @@ export default function Home() {
 
             {/* Live Whales Table */}
             {activeTwaps.length > 0 && (
-              <div className="rounded-3xl bg-gradient-to-br from-gray-900/60 to-gray-900/30 border border-gray-800/50 backdrop-blur-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="p-6 border-b border-gray-800/50 flex justify-between items-center">
-                  <h3 className="text-xl font-bold flex items-center gap-3">
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-3">
                     <div className="p-2 rounded-xl bg-amber-500/10">
                       <TrendingUp className="w-5 h-5 text-amber-400" />
                     </div>
-                    Live Whale Activity
-                    <span className="ml-2 px-2 py-0.5 text-xs bg-amber-500/20 text-amber-400 rounded-full">{activeTwaps.length} active</span>
-                  </h3>
+                    <h3 className="text-xl font-bold">
+                      Live Whale Activity
+                      <span className="ml-2 px-2 py-0.5 text-xs bg-amber-500/20 text-amber-400 rounded-full">{activeTwaps.length} active</span>
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setShowAllTwaps(!showAllTwaps)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${showAllTwaps
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      : 'bg-gray-800/50 text-gray-400 border border-gray-700/50 hover:bg-gray-700/50'
+                      }`}
+                  >
+                    {showAllTwaps ? '🌍 Show All' : '👁️ Watched Only'}
+                  </button>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase tracking-wider">
-                      <tr>
-                        <th className="p-4 font-semibold">Token</th>
-                        <th className="p-4 font-semibold">Side</th>
-                        <th className="p-4 font-semibold">Size (USD)</th>
-                        <th className="p-4 font-semibold">Duration</th>
-                        <th className="p-4 font-semibold">User</th>
-                        <th className="p-4 text-right font-semibold">Link</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800/30">
-                      {activeTwaps.map((t: any) => (
-                        <tr key={t.hash} className="hover:bg-gray-800/20 transition">
-                          <td className="p-4 font-bold text-white">{t.token}</td>
-                          <td className="p-4">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${t.side === 'BUY'
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                              }`}>
-                              {t.side}
-                            </span>
-                          </td>
-                          <td className="p-4 text-white font-mono font-bold">${t.size.toLocaleString()}</td>
-                          <td className="p-4 text-gray-400">{t.minutes}m</td>
-                          <td className="p-4 font-mono text-xs text-gray-500">{t.user.substring(0, 6)}...{t.user.slice(-4)}</td>
-                          <td className="p-4 text-right">
-                            <a
-                              href={`https://hypurrscan.io/tx/${t.hash}`}
-                              target="_blank"
-                              className="text-blue-400 hover:text-blue-300 hover:underline text-sm font-medium"
-                            >
-                              View →
-                            </a>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+
+                <ActiveTwapsTable twaps={activeTwaps} />
               </div>
             )}
           </div>

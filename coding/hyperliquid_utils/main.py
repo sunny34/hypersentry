@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
 import os
+import time
 from urllib.parse import urlencode
 import colorlog
 import uvicorn
@@ -309,30 +310,51 @@ async def get_twaps(user: User = Depends(require_user), db: Session = Depends(ge
 
 
 @app.get("/twap/active")
-async def get_active_twaps(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Returns all active TWAPs for UI display (filtered by user's tokens)."""
+async def get_active_twaps(
+    user: User = Depends(require_user), 
+    db: Session = Depends(get_db),
+    show_all: bool = False
+):
+    """Returns active TWAPs for UI display.
+    
+    By default, filters to show only user's watched tokens.
+    Set show_all=true to see all global TWAPs.
+    """
+    
     # Get user's watched tokens
     user_twaps = db.query(UserTwap).filter(UserTwap.user_id == user.id).all()
     watched_tokens = {t.token.upper() for t in user_twaps}
-    min_size = user_twaps[0].min_size if user_twaps else 10000
     
+    # Get min_size preference
+    user_twap_pref = user_twaps[0] if user_twaps else None
+    min_size = user_twap_pref.min_size if user_twap_pref else 10000
+
     all_twaps = []
     for token, twaps in manager.twap_detector.active_twaps.items():
-        if token.upper() not in watched_tokens:
-            continue
+        # Filter by watched tokens unless show_all is True
+        if not show_all:
+            # Match base token (handle @HYPE, HYPE/USDC etc)
+            base_token = token.replace("@", "").split("/")[0].upper()
+            if not any(base_token == w.upper() or token.upper() == w.upper() for w in watched_tokens):
+                continue
+
         for t in twaps:
-            twap_data = t['action']['twap']
+            twap_data = t.get('action', {}).get('twap', {})
+            size = t.get('size_usd', float(twap_data.get('s', 0)))
+            
             all_twaps.append({
                 "token": token,
-                "size": float(twap_data['s']),
-                "side": "BUY" if twap_data['b'] else "SELL",
-                "user": t['user'],
-                "minutes": twap_data['m'],
-                "hash": t['hash'],
-                "time": t['time']
+                "size": size,
+                "side": "BUY" if twap_data.get('b', True) else "SELL",
+                "user": t.get('user', ''),
+                "minutes": twap_data.get('m', 0),
+                "hash": t.get('hash', ''),
+                "time": t.get('time', 0),
+                "is_perp": twap_data.get('t', False),  # True = Perp, False = Spot
+                "reduce_only": twap_data.get('r', False)
             })
     
-    return {"twaps": all_twaps, "min_size": min_size}
+    return {"twaps": all_twaps, "min_size": min_size, "watched_tokens": list(watched_tokens)}
 
 
 @app.post("/twap/add")
@@ -510,6 +532,265 @@ async def upload_csv(
     
     db.commit()
     return {"status": "imported", "count": added_count, "user_id": str(user.id)}
+
+
+# ============== TRADING TERMINAL ENDPOINTS ==============
+
+@app.get("/trading/tokens")
+async def get_trading_tokens():
+    """Get available tokens for trading (perps + spot) with 24h stats."""
+    import aiohttp
+    
+    tokens = []
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Fetch perp metadata and context (prices, 24h stats)
+            async with session.post(
+                "https://api.hyperliquid.xyz/info",
+                json={"type": "metaAndAssetCtxs"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # data[0] is meta, data[1] is assetCtxs
+                    meta = data[0]
+                    asset_ctxs = data[1]
+                    
+                    for i, asset in enumerate(meta.get("universe", [])):
+                        ctx = asset_ctxs[i] if i < len(asset_ctxs) else {}
+                        current_price = float(ctx.get("markPx", 0))
+                        prev_day_px = float(ctx.get("prevDayPx", 0))
+                        
+                        change_24h = 0
+                        if prev_day_px > 0:
+                            change_24h = ((current_price - prev_day_px) / prev_day_px) * 100
+                            
+                        tokens.append({
+                            "symbol": asset["name"],
+                            "pair": f"{asset['name']}/USDC",
+                            "name": asset["name"],
+                            "type": "perp",
+                            "price": current_price,
+                            "prevPrice": prev_day_px,
+                            "change24h": change_24h,
+                            "volume24h": float(ctx.get("dayNtlVlm", 0)),
+                            "openInterest": float(ctx.get("openInterest", 0)),
+                            "funding": float(ctx.get("funding", 0)),
+                            "maxLeverage": asset.get("maxLeverage", 50)
+                        })
+            
+    except Exception as e:
+        logger.error(f"Failed to fetch tokens: {e}")
+        # Return fallback if API fails
+        tokens = [
+             {"symbol": "BTC", "pair": "BTC/USDC", "name": "Bitcoin", "type": "perp", "price": 0, "change24h": 0},
+             {"symbol": "ETH", "pair": "ETH/USDC", "name": "Ethereum", "type": "perp", "price": 0, "change24h": 0}
+        ]
+    
+    return {"tokens": tokens}
+
+
+class CandlesRequest(BaseModel):
+    token: str
+    interval: str
+    start_time: int
+    end_time: int
+
+
+@app.post("/trading/candles")
+async def get_candles(req: CandlesRequest):
+    """Get candle snapshot via backend proxy."""
+    try:
+        # Fetch candles using the SDK wrapper
+        candles = manager.client.get_candles(
+            coin=req.token,
+            interval=req.interval,
+            start_time=req.start_time,
+            end_time=req.end_time
+        )
+        return candles
+    except Exception as e:
+        logger.error(f"Failed to fetch candles via proxy: {e}")
+        return []
+
+
+class AnalyzeRequest(BaseModel):
+    token: str
+    interval: str = "1h"
+
+
+@app.post("/trading/analyze")
+async def analyze_chart(req: AnalyzeRequest):
+    """Get AI analysis for a token based on technical indicators."""
+    import aiohttp
+    import numpy as np
+    
+    token = req.token.upper()
+    
+    # Map frontend interval (TradingView style) to Hyperliquid
+    interval_map = {
+        "15": "15m",
+        "60": "1h",
+        "240": "4h",
+        "D": "1d",
+        "1D": "1d"
+    }
+    hl_interval = interval_map.get(req.interval, "1h")
+    
+    # Calculate lookback based on interval (need ~50-100 candles)
+    # 100 candles * duration in seconds
+    duration_map = {
+        "15m": 15 * 60,
+        "1h": 60 * 60,
+        "4h": 4 * 60 * 60,
+        "1d": 24 * 60 * 60
+    }
+    
+    lookback_seconds = 100 * duration_map.get(hl_interval, 3600)
+    start_time = int((time.time() - lookback_seconds) * 1000)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Fetch candles
+            async with session.post(
+                "https://api.hyperliquid.xyz/info",
+                json={
+                    "type": "candleSnapshot",
+                    "req": {
+                        "coin": token,
+                        "interval": hl_interval,
+                        "startTime": start_time,
+                        "endTime": int(time.time() * 1000)
+                    }
+                },
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status != 200:
+                    raise Exception("Failed to fetch candles")
+                candles = await resp.json()
+        
+        if not candles or len(candles) < 14:
+            raise Exception("Insufficient data")
+        
+        # Extract close prices
+        closes = np.array([float(c["c"]) for c in candles])
+        
+        # Calculate RSI
+        deltas = np.diff(closes)
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.mean(gains[-14:])
+        avg_loss = np.mean(losses[-14:])
+        rs = avg_gain / avg_loss if avg_loss > 0 else 100
+        rsi = 100 - (100 / (1 + rs))
+        
+        # Calculate EMAs
+        ema_12 = np.mean(closes[-12:])
+        ema_26 = np.mean(closes[-26:]) if len(closes) >= 26 else np.mean(closes)
+        macd = ema_12 - ema_26
+        
+        # Determine trend
+        ema_50 = np.mean(closes[-50:]) if len(closes) >= 50 else np.mean(closes)
+        current_price = closes[-1]
+        trend = "up" if current_price > ema_50 else "down" if current_price < ema_50 * 0.98 else "sideways"
+        
+        # Generate recommendation
+        direction = "neutral"
+        confidence = 50
+        reasoning = ""
+        
+        if rsi < 30 and trend != "down":
+            direction = "long"
+            confidence = min(85, 60 + int(30 - rsi))
+            reasoning = f"{token} is oversold (RSI {rsi:.1f}). Price showing signs of reversal near support."
+        elif rsi > 70 and trend != "up":
+            direction = "short"
+            confidence = min(85, 60 + int(rsi - 70))
+            reasoning = f"{token} is overbought (RSI {rsi:.1f}). Expect pullback from resistance."
+        elif macd > 0 and rsi > 50 and trend == "up":
+            direction = "long"
+            confidence = 65
+            reasoning = f"{token} showing bullish momentum. MACD positive, trend is up. Consider long positions."
+        elif macd < 0 and rsi < 50 and trend == "down":
+            direction = "short"
+            confidence = 65
+            reasoning = f"{token} showing bearish momentum. MACD negative, trend is down. Consider shorts."
+        else:
+            direction = "neutral"
+            confidence = 45
+            reasoning = f"{token} in consolidation. Mixed signals - wait for clearer setup."
+        
+        return {
+            "direction": direction,
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "indicators": {
+                "rsi": float(rsi),
+                "macd_signal": "bullish" if macd > 0 else "bearish" if macd < 0 else "neutral",
+                "trend": trend
+            },
+            "timestamp": int(time.time() * 1000)
+        }
+        
+    except Exception as e:
+        logger.error(f"Analysis failed for {token}: {e}")
+        # Return demo analysis on error
+        import random
+        direction = random.choice(["long", "short", "neutral"])
+        return {
+            "direction": direction,
+            "confidence": random.randint(55, 80),
+            "reasoning": f"Demo analysis for {token}. Enable real data for accurate signals.",
+            "indicators": {
+                "rsi": random.uniform(30, 70),
+                "macd_signal": "bullish" if direction == "long" else "bearish" if direction == "short" else "neutral",
+                "trend": "up" if direction == "long" else "down" if direction == "short" else "sideways"
+            },
+            "timestamp": int(time.time() * 1000)
+        }
+
+
+class OrderRequest(BaseModel):
+    token: str
+    side: str  # "buy" or "sell"
+    size: float
+    price: Optional[float] = None
+    order_type: str = "market"  # "market" or "limit"
+
+
+@app.post("/trading/order")
+async def place_order(req: OrderRequest, user: User = Depends(require_user)):
+    """Place a trading order (simulation mode if no private key)."""
+    
+    # Check if we have a configured exchange
+    if not manager.client.exchange:
+        return {
+            "status": "simulated",
+            "simulated": True,
+            "message": f"Would have placed {req.side.upper()} {req.size} {req.token} @ {req.order_type}",
+            "order": {
+                "token": req.token,
+                "side": req.side,
+                "size": req.size,
+                "price": req.price,
+                "type": req.order_type
+            }
+        }
+    
+    # Real order placement would go here
+    try:
+        is_buy = req.side.lower() == "buy"
+        result = manager.client.market_open(
+            coin=req.token,
+            is_buy=is_buy,
+            sz=req.size,
+            px=req.price
+        )
+        return {"status": "filled", "result": result}
+    except Exception as e:
+        logger.error(f"Order failed: {e}")
+        return {"status": "error", "error": str(e)}
 
 
 if __name__ == "__main__":

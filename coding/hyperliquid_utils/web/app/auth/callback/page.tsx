@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useRef } from 'react';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
@@ -10,6 +10,7 @@ function AuthCallbackContent() {
     const searchParams = useSearchParams();
     const { handleCallback } = useAuth();
     const [error, setError] = useState<string | null>(null);
+    const processedRef = useRef(false);
 
     useEffect(() => {
         const code = searchParams.get('code');
@@ -21,6 +22,10 @@ function AuthCallbackContent() {
         }
 
         if (code) {
+            // Prevent double-execution in React Strict Mode (Development)
+            if (processedRef.current) return;
+            processedRef.current = true;
+
             const redirectUri = `${window.location.origin}/auth/callback`;
             handleCallback(code, redirectUri)
                 .then(() => {

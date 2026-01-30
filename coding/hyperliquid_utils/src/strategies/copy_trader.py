@@ -4,6 +4,8 @@ import random
 import time
 from src.client_wrapper import HyperliquidClient
 from src.notifications import TelegramBot
+from models import User, Wallet
+from database import get_db_session
 
 class CopyTrader:
     def __init__(self, client: HyperliquidClient, notifier: TelegramBot, target_address: str, active_trading: bool = False, silent: bool = False, label: str = None):
@@ -137,7 +139,19 @@ class CopyTrader:
                         f"<a href='https://app.hyperliquid.xyz/explorer/address/{self.target_address}'>View on Hyperliquid</a>"
                     )
                     
-                    await self.notifier.send_message(msg)
+                    try:
+                        with get_db_session() as db:
+                            # Find all users watching this wallet
+                            watchers = db.query(Wallet, User).join(User).filter(
+                                Wallet.address == self.target_address
+                            ).all()
+                            
+                            for wallet, user in watchers:
+                                if user.telegram_chat_id:
+                                    await self.notifier.send_message(msg, chat_id=user.telegram_chat_id)
+                                    logging.info(f"Sent alert to {user.email} for {self.target_address}")
+                    except Exception as e:
+                        logging.error(f"Failed to send wallet alerts: {e}")
                 
                 # Update known position
                 self.known_positions[coin] = new_size

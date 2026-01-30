@@ -56,6 +56,16 @@ class HyperliquidClient:
             logging.error(f"Error fetching L2 snapshot for {coin}: {e}")
             return None
 
+    def get_candles(self, coin: str, interval: str, start_time: int, end_time: int):
+        """
+        Get candle snapshot for a coin.
+        """
+        try:
+            return self.info.candles_snapshot(coin, interval, start_time, end_time)
+        except Exception as e:
+            logging.error(f"Error fetching candles for {coin}: {e}")
+            return []
+
     def market_open(self, coin: str, is_buy: bool, sz: float, px: float = None, slippage: float = 0.05):
         """
         Execute a Market Open order. 
