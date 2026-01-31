@@ -7,12 +7,32 @@ interface ChartWidgetProps {
 }
 
 // Map internal symbols to TradingView symbols
+// Map internal symbols to TradingView symbols
 const SYMBOL_MAP: Record<string, string> = {
+    // Crypto
     'BTC': 'BINANCE:BTCUSDT',
     'ETH': 'BINANCE:ETHUSDT',
     'SOL': 'BINANCE:SOLUSDT',
-    'HYPE': 'PYTH:HYPEUSD', // Fallback or find a valid source
-    'PURR': 'BINANCE:BTCUSDT', // Fallback for unknown
+    'HYPE': 'PYTH:HYPEUSD',
+    'PURR': 'BINANCE:BTCUSDT', // Fallback
+
+    // Indices / Equities (HIP-3 Spot/Perp)
+    'US500': 'OANDA:SPX500USD', // S&P 500
+    'SPX': 'OANDA:SPX500USD',
+    'NDX': 'OANDA:NAS100USD',
+    'USTECH': 'OANDA:NAS100USD', // Nasdaq
+    'DJI': 'OANDA:US30USD', // Dow Jones
+    'TSLA': 'NASDAQ:TSLA',
+    'AAPL': 'NASDAQ:AAPL',
+    'NVDA': 'NASDAQ:NVDA',
+    'GOOGL': 'NASDAQ:GOOGL',
+    'AMZN': 'NASDAQ:AMZN',
+    'MSFT': 'NASDAQ:MSFT',
+
+    // Forex
+    'EURUSD': 'FX:EURUSD',
+    'USDJPY': 'FX:USDJPY',
+    'GBPUSD': 'FX:GBPUSD',
 };
 
 function ChartWidget({ symbol, interval = "60" }: ChartWidgetProps) {
@@ -22,7 +42,17 @@ function ChartWidget({ symbol, interval = "60" }: ChartWidgetProps) {
     useEffect(() => {
         if (!containerRef.current) return;
 
-        const tvSymbol = SYMBOL_MAP[symbol] || `BINANCE:${symbol}USDT`;
+        // Logic to determine TradingView symbol
+        let tvSymbol = SYMBOL_MAP[symbol];
+
+        if (!tvSymbol) {
+            // Heuristic for unknown symbols
+            if (symbol.includes('USD')) {
+                tvSymbol = `BINANCE:${symbol}T`; // Try Binance Match
+            } else {
+                tvSymbol = `BINANCE:${symbol}USDT`; // Default assumption is Crypto-USDT pair
+            }
+        }
 
         const loadScript = () => {
             if (!tvScriptLoadingPromise.current) {

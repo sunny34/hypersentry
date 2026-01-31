@@ -13,6 +13,8 @@ import OrderBook from '@/components/OrderBook';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useSidebar } from '@/contexts/SidebarContext';
 import DashboardPanel from '@/components/trading/DashboardPanel';
+import TokenSelector from '@/components/trading/TokenSelector';
+import TimeframeSelector from '@/components/trading/TimeframeSelector';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -149,71 +151,45 @@ export default function TradingTerminal() {
                 <div className="p-4 flex-1 flex flex-col h-full overflow-hidden gap-4">
                     <div className="flex items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-4">
-                            {/* Token Selector */}
-                            <select
-                                value={selectedToken}
-                                onChange={(e) => {
-                                    const newToken = e.target.value;
-                                    setSelectedToken(newToken);
-                                    // Update price/stats immediately from cache if available
-                                    const t = tokens.find(tk => tk.symbol === newToken);
+                            {/* New Token Selector */}
+                            <TokenSelector
+                                selectedToken={selectedToken}
+                                tokens={tokens}
+                                onSelect={(token) => {
+                                    setSelectedToken(token);
+                                    const t = tokens.find(tk => tk.symbol === token);
                                     if (t) {
                                         setCurrentPrice(t.price);
                                         setPriceChangePercent(t.change24h);
                                     }
                                 }}
-                                className="bg-gray-900/80 border border-gray-700/50 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-emerald-500/50 hover:bg-gray-800/80 transition cursor-pointer"
-                            >
-                                {tokens.map((t) => (
-                                    <option key={t.symbol} value={t.symbol}>
-                                        {t.pair}
-                                    </option>
-                                ))}
-                            </select>
+                            />
 
-                            {/* Global Timeframe Selector */}
-                            <select
-                                value={selectedInterval}
-                                onChange={(e) => setSelectedInterval(e.target.value)}
-                                className="bg-gray-900/80 border border-gray-700/50 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-emerald-500/50 hover:bg-gray-800/80 transition cursor-pointer h-[46px]"
-                            >
-                                {[
-                                    { label: '1m', value: '1' },
-                                    { label: '5m', value: '5' },
-                                    { label: '15m', value: '15' },
-                                    { label: '30m', value: '30' },
-                                    { label: '1h', value: '60' },
-                                    { label: '4h', value: '240' },
-                                    { label: '1d', value: 'D' },
-                                    { label: '1w', value: 'W' }
-                                ].map((tf) => (
-                                    <option key={tf.value} value={tf.value}>
-                                        {tf.label}
-                                    </option>
-                                ))}
-                            </select>
+                            {/* New Timeframe Selector */}
+                            <TimeframeSelector
+                                selected={selectedInterval}
+                                onSelect={setSelectedInterval}
+                            />
+
+                            <div className="w-px h-8 bg-gray-800 mx-2"></div>
 
                             {/* Current Price and Stats */}
-                            <div className="flex items-center gap-8 text-sm">
+                            <div className="flex items-center gap-6 text-sm">
                                 {/* Current Price */}
-                                <div className="flex items-center gap-3">
-                                    <span className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                                <div className="flex flex-col">
+                                    <span className={`text-xl font-bold font-mono ${priceChangePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                         {formatPrice(currentPrice)}
+                                    </span>
+                                    {/* 24h Change */}
+                                    <span className={`text-xs font-medium ${priceChangePercent >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                        {priceChangePercent >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%
                                     </span>
                                 </div>
 
-                                {/* 24h Change */}
-                                <div>
-                                    <p className="text-gray-500 font-medium mb-0.5">24h Change</p>
-                                    <p className={`font-bold flex items-center gap-1 ${priceChangePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                        {priceChangePercent >= 0 ? '+' : ''}{formatPrice(currentPrice - (currentPrice / (1 + priceChangePercent / 100)))} / {priceChangePercent >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%
-                                    </p>
-                                </div>
-
                                 {/* 24h Volume */}
-                                <div>
-                                    <p className="text-gray-500 font-medium mb-0.5">24h Volume</p>
-                                    <p className="font-bold text-white">
+                                <div className="hidden lg:block">
+                                    <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-0.5">24h Vol</p>
+                                    <p className="font-bold text-gray-300 font-mono text-xs">
                                         {tokens.find(t => t.symbol === selectedToken)?.volume24h
                                             ? formatCompact(tokens.find(t => t.symbol === selectedToken)?.volume24h || 0)
                                             : '-'}
@@ -221,9 +197,9 @@ export default function TradingTerminal() {
                                 </div>
 
                                 {/* Open Interest */}
-                                <div>
-                                    <p className="text-gray-500 font-medium mb-0.5">Open Interest</p>
-                                    <p className="font-bold text-white">
+                                <div className="hidden lg:block">
+                                    <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-0.5">Open Interest</p>
+                                    <p className="font-bold text-gray-300 font-mono text-xs">
                                         {tokens.find(t => t.symbol === selectedToken)?.openInterest
                                             ? formatCompact(tokens.find(t => t.symbol === selectedToken)?.openInterest || 0)
                                             : '-'}
@@ -231,13 +207,12 @@ export default function TradingTerminal() {
                                 </div>
 
                                 {/* Funding Rate */}
-                                <div>
-                                    <p className="text-gray-500 font-medium mb-0.5">Funding / Countdown</p>
-                                    <p className="font-bold text-amber-400 flex items-center gap-2">
+                                <div className="hidden lg:block">
+                                    <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-0.5">Funding</p>
+                                    <p className="font-bold text-amber-400 font-mono text-xs">
                                         {tokens.find(t => t.symbol === selectedToken)?.funding
                                             ? `${((tokens.find(t => t.symbol === selectedToken)?.funding || 0) * 100).toFixed(4)}%`
                                             : '0.0000%'}
-                                        <span className="text-white font-mono text-xs">00:57:22</span>
                                     </p>
                                 </div>
                             </div>
@@ -245,9 +220,9 @@ export default function TradingTerminal() {
 
                         <div className="flex items-center gap-4">
                             <ConnectButton showBalance={false} accountStatus="avatar" />
-                            <div className="flex items-center gap-2 text-sm text-gray-500">
-                                <Zap className="w-4 h-4 text-yellow-500" />
-                                <span>Hyperliquid L1</span>
+                            <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-900/50 px-2 py-1 rounded border border-gray-800">
+                                <Zap className="w-3 h-3 text-yellow-500" />
+                                <span>L1</span>
                             </div>
                         </div>
                     </div>
