@@ -12,6 +12,7 @@ import NewsTicker from '@/components/trading/NewsTicker';
 import OrderBook from '@/components/OrderBook';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useSidebar } from '@/contexts/SidebarContext';
+import DashboardPanel from '@/components/trading/DashboardPanel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -251,65 +252,72 @@ export default function TradingTerminal() {
                     </div>
 
                     {/* Main Content - Pro Layout (3 Columns) */}
-                    <div className="flex gap-4 flex-1 min-h-0">
+                    <div className="flex flex-col gap-4 flex-1 min-h-0">
+                        {/* Upper Section: Chart & Order Book & Analysis */}
+                        <div className="flex h-[60%] gap-4 min-h-0">
+                            {/* Left Panel - Chart (Flex 3) */}
+                            <div className="flex-[3] bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm min-w-0">
+                                <div className="flex-1 w-full h-full">
+                                    <ChartWidget symbol={selectedToken} interval={selectedInterval} />
+                                </div>
+                            </div>
 
-                        {/* Left Panel - Chart (Flex 6) */}
-                        <div className="flex-[6] bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm min-w-0">
-                            <div className="flex-1 w-full h-full">
-                                <ChartWidget symbol={selectedToken} interval={selectedInterval} />
+                            {/* Middle Panel - Order Book (Flex 1) */}
+                            <div className="flex-1 bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm min-w-0 flex flex-col hidden xl:flex">
+                                <OrderBook coin={selectedToken} />
+                            </div>
+
+                            {/* Right Panel - Trading & Analysis (Flex 1.5) */}
+                            <div className="flex-[1.5] flex flex-col gap-4 min-w-0 overflow-y-auto">
+                                {/* Order Form */}
+                                <div className="bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm flex-shrink-0">
+                                    <OrderForm
+                                        symbol={selectedToken}
+                                        currentPrice={currentPrice}
+                                        isAuthenticated={isAuthenticated}
+                                        onLogin={() => login('google')}
+                                    />
+                                </div>
+
+                                {/* Intel Hub (Tabs: AI & News) */}
+                                <div className="flex-1 bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm min-h-[200px] flex flex-col">
+                                    <div className="flex items-center gap-2 mb-4 border-b border-gray-700/50 pb-2">
+                                        <button
+                                            onClick={() => setActiveTab('analysis')}
+                                            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'analysis'
+                                                ? 'bg-blue-500/20 text-blue-400'
+                                                : 'text-gray-500 hover:text-gray-300'
+                                                }`}
+                                        >
+                                            <TrendingUp className="w-4 h-4" />
+                                            AI Analysis
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('news')}
+                                            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'news'
+                                                ? 'bg-purple-500/20 text-purple-400'
+                                                : 'text-gray-500 hover:text-gray-300'
+                                                }`}
+                                        >
+                                            <Newspaper className="w-4 h-4" />
+                                            Intel & News
+                                        </button>
+                                    </div>
+
+                                    <div className="flex-1 min-h-0 overflow-hidden">
+                                        {activeTab === 'analysis' ? (
+                                            <AIAnalysis symbol={selectedToken} interval={selectedInterval} />
+                                        ) : (
+                                            <NewsFeed symbol={selectedToken} />
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Middle Panel - Order Book (Flex 3) */}
-                        <div className="flex-[3] bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm min-w-0 flex flex-col">
-                            <OrderBook coin={selectedToken} />
-                        </div>
-
-                        {/* Right Panel - Trading & Analysis (Flex 3) */}
-                        <div className="flex-[3] flex flex-col gap-4 min-w-0 overflow-y-auto">
-                            {/* Order Form */}
-                            <div className="bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm flex-shrink-0">
-                                <OrderForm
-                                    symbol={selectedToken}
-                                    currentPrice={currentPrice}
-                                    isAuthenticated={isAuthenticated}
-                                    onLogin={() => login('google')}
-                                />
-                            </div>
-
-                            {/* Intel Hub (Tabs: AI & News) */}
-                            <div className="flex-1 bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm min-h-[300px] flex flex-col">
-                                <div className="flex items-center gap-2 mb-4 border-b border-gray-700/50 pb-2">
-                                    <button
-                                        onClick={() => setActiveTab('analysis')}
-                                        className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'analysis'
-                                            ? 'bg-blue-500/20 text-blue-400'
-                                            : 'text-gray-500 hover:text-gray-300'
-                                            }`}
-                                    >
-                                        <TrendingUp className="w-4 h-4" />
-                                        AI Analysis
-                                    </button>
-                                    <button
-                                        onClick={() => setActiveTab('news')}
-                                        className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'news'
-                                            ? 'bg-purple-500/20 text-purple-400'
-                                            : 'text-gray-500 hover:text-gray-300'
-                                            }`}
-                                    >
-                                        <Newspaper className="w-4 h-4" />
-                                        Intel & News
-                                    </button>
-                                </div>
-
-                                <div className="flex-1 min-h-0 overflow-hidden">
-                                    {activeTab === 'analysis' ? (
-                                        <AIAnalysis symbol={selectedToken} interval={selectedInterval} />
-                                    ) : (
-                                        <NewsFeed symbol={selectedToken} />
-                                    )}
-                                </div>
-                            </div>
+                        {/* Lower Section: Dashboard Panel (Positions/Orders) */}
+                        <div className="flex-1 min-h-0">
+                            <DashboardPanel isAuthenticated={isAuthenticated} />
                         </div>
                     </div>
                 </div>
