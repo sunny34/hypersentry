@@ -177,7 +177,14 @@ async def google_callback(
     callback_uri = redirect_uri or f"{FRONTEND_URL}/auth/callback"
     
     # Exchange code for user info
-    google_user = await exchange_google_code(code, callback_uri)
+    logger.info(f"DEBUG AUTH: code={code[:10]}... redirect_uri_param={redirect_uri}")
+    logger.info(f"DEBUG AUTH: FINAL callback_uri={callback_uri}")
+    
+    try:
+        google_user = await exchange_google_code(code, callback_uri)
+    except Exception as e:
+        logger.error(f"DEBUG AUTH: Exchange failed. Error: {e}")
+        raise e
     
     # Get or create user in database
     user = get_or_create_user(
