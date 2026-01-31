@@ -140,13 +140,13 @@ export default function TradingTerminal() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white flex">
+        <div className="h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white flex overflow-hidden">
             <Sidebar currentView="terminal" onViewChange={() => { }} />
 
-            <main className={`flex-1 overflow-hidden flex flex-col transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
+            <main className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'} h-full`}>
 
-                <div className="p-4 flex-1 flex flex-col h-full overflow-hidden">
-                    <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                <div className="p-4 flex-1 flex flex-col h-full overflow-hidden gap-4">
+                    <div className="flex items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-4">
                             {/* Token Selector */}
                             <select
@@ -253,8 +253,8 @@ export default function TradingTerminal() {
 
                     {/* Main Content - Pro Layout (3 Columns) */}
                     <div className="flex flex-col gap-4 flex-1 min-h-0">
-                        {/* Upper Section: Chart & Order Book & Analysis */}
-                        <div className="flex h-[60%] gap-4 min-h-0">
+                        {/* Upper Section (50%): Chart & Order Book & Order Form */}
+                        <div className="flex h-[50%] gap-4 min-h-0">
                             {/* Left Panel - Chart (Flex 3) */}
                             <div className="flex-[3] bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm min-w-0">
                                 <div className="flex-1 w-full h-full">
@@ -267,10 +267,9 @@ export default function TradingTerminal() {
                                 <OrderBook coin={selectedToken} />
                             </div>
 
-                            {/* Right Panel - Trading & Analysis (Flex 1.5) */}
-                            <div className="flex-[1.5] flex flex-col gap-4 min-w-0 overflow-y-auto">
-                                {/* Order Form */}
-                                <div className="bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm flex-shrink-0">
+                            {/* Right Panel - Order Form Only (Flex 1) */}
+                            <div className="flex-1 flex flex-col gap-4 min-w-0">
+                                <div className="flex-1 bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm overflow-y-auto">
                                     <OrderForm
                                         symbol={selectedToken}
                                         currentPrice={currentPrice}
@@ -278,46 +277,49 @@ export default function TradingTerminal() {
                                         onLogin={() => login('google')}
                                     />
                                 </div>
-
-                                {/* Intel Hub (Tabs: AI & News) */}
-                                <div className="flex-1 bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm min-h-[200px] flex flex-col">
-                                    <div className="flex items-center gap-2 mb-4 border-b border-gray-700/50 pb-2">
-                                        <button
-                                            onClick={() => setActiveTab('analysis')}
-                                            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'analysis'
-                                                ? 'bg-blue-500/20 text-blue-400'
-                                                : 'text-gray-500 hover:text-gray-300'
-                                                }`}
-                                        >
-                                            <TrendingUp className="w-4 h-4" />
-                                            AI Analysis
-                                        </button>
-                                        <button
-                                            onClick={() => setActiveTab('news')}
-                                            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'news'
-                                                ? 'bg-purple-500/20 text-purple-400'
-                                                : 'text-gray-500 hover:text-gray-300'
-                                                }`}
-                                        >
-                                            <Newspaper className="w-4 h-4" />
-                                            Intel & News
-                                        </button>
-                                    </div>
-
-                                    <div className="flex-1 min-h-0 overflow-hidden">
-                                        {activeTab === 'analysis' ? (
-                                            <AIAnalysis symbol={selectedToken} interval={selectedInterval} />
-                                        ) : (
-                                            <NewsFeed symbol={selectedToken} />
-                                        )}
-                                    </div>
-                                </div>
                             </div>
                         </div>
 
-                        {/* Lower Section: Dashboard Panel (Positions/Orders) */}
-                        <div className="flex-1 min-h-0">
-                            <DashboardPanel isAuthenticated={isAuthenticated} />
+                        {/* Lower Section (45%): Dashboard & Intel Hub */}
+                        <div className="flex-1 flex gap-4 min-h-0">
+                            {/* Dashboard Panel (Positions/Orders) - 75% width */}
+                            <div className="w-[75%] min-w-0">
+                                <DashboardPanel isAuthenticated={isAuthenticated} />
+                            </div>
+
+                            {/* Intel Hub (AI & News) - 25% width */}
+                            <div className="w-[25%] bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm flex flex-col min-w-0">
+                                <div className="flex items-center gap-2 mb-4 border-b border-gray-700/50 pb-2">
+                                    <button
+                                        onClick={() => setActiveTab('analysis')}
+                                        className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'analysis'
+                                            ? 'bg-blue-500/20 text-blue-400'
+                                            : 'text-gray-500 hover:text-gray-300'
+                                            }`}
+                                    >
+                                        <TrendingUp className="w-4 h-4" />
+                                        AI Analysis
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('news')}
+                                        className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'news'
+                                            ? 'bg-purple-500/20 text-purple-400'
+                                            : 'text-gray-500 hover:text-gray-300'
+                                            }`}
+                                    >
+                                        <Newspaper className="w-4 h-4" />
+                                        Intel & News
+                                    </button>
+                                </div>
+
+                                <div className="flex-1 min-h-0 overflow-y-auto">
+                                    {activeTab === 'analysis' ? (
+                                        <AIAnalysis symbol={selectedToken} interval={selectedInterval} />
+                                    ) : (
+                                        <NewsFeed symbol={selectedToken} />
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
