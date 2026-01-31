@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Newspaper, Flame, ExternalLink } from 'lucide-react';
 
-interface NewsTickerProps {
 interface NewsTickerProps extends React.HTMLAttributes<HTMLDivElement> {
     symbol: string;
 }
