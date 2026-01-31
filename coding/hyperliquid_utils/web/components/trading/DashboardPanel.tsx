@@ -10,18 +10,18 @@ export default function DashboardPanel({ isAuthenticated }: DashboardPanelProps)
     const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'history' | 'balances'>('positions');
 
     // Demo data for now
-    const positions = [
-        // {
-        //     coin: 'BTC',
-        //     size: 0.15,
-        //     value: 12500,
-        //     entryPrice: 83200,
-        //     markPrice: 83700,
-        //     pnl: 75.00,
-        //     roe: 12.5,
-        //     side: 'LONG' as const,
-        //     liquidationPrice: 71000
-        // }
+    const positions: any[] = [
+        {
+            coin: 'BTC',
+            size: 0.15,
+            value: 12500,
+            entryPrice: 83200,
+            markPrice: 83700,
+            pnl: 75.00,
+            roe: 12.5,
+            side: 'LONG',
+            liquidationPrice: 71000
+        }
     ];
 
     return (
@@ -38,8 +38,8 @@ export default function DashboardPanel({ isAuthenticated }: DashboardPanelProps)
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
                         className={`px-4 py-3 text-sm font-bold border-b-2 transition ${activeTab === tab.id
-                                ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5'
-                                : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                            ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5'
+                            : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'
                             }`}
                     >
                         {tab.label}
@@ -49,7 +49,7 @@ export default function DashboardPanel({ isAuthenticated }: DashboardPanelProps)
 
             {/* Content Area */}
             <div className="flex-1 overflow-auto bg-black/20">
-                {!isAuthenticated ? (
+                {false ? (
                     <div className="flex flex-col items-center justify-center h-full text-gray-500">
                         <p className="font-medium">Connect wallet to view {activeTab}</p>
                     </div>

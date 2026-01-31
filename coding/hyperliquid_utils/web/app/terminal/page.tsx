@@ -39,6 +39,7 @@ export default function TradingTerminal() {
     const [currentPrice, setCurrentPrice] = useState<number>(0);
     const [priceChangePercent, setPriceChangePercent] = useState<number>(0);
     const [isLoadingTokens, setIsLoadingTokens] = useState(true);
+    const [topHeight, setTopHeight] = useState(50); // Percent height of top section
     const [notification, setNotification] = useState<{ title: string; message: string; type: 'bullish' | 'bearish' | 'neutral' } | null>(null);
 
     const getAuthConfig = useCallback(() => {
@@ -252,9 +253,9 @@ export default function TradingTerminal() {
                     </div>
 
                     {/* Main Content - Pro Layout (3 Columns) */}
-                    <div className="flex flex-col gap-4 flex-1 min-h-0">
-                        {/* Upper Section (50%): Chart & Order Book & Order Form */}
-                        <div className="flex h-[50%] gap-4 min-h-0">
+                    <div className="flex flex-col flex-1 min-h-0 relative">
+                        {/* Upper Section: Chart & Order Book & Order Form */}
+                        <div style={{ height: `${topHeight}%` }} className="flex gap-4 min-h-0 pb-2">
                             {/* Left Panel - Chart (Flex 3) */}
                             <div className="flex-[3] bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm min-w-0">
                                 <div className="flex-1 w-full h-full">
@@ -280,8 +281,36 @@ export default function TradingTerminal() {
                             </div>
                         </div>
 
-                        {/* Lower Section (45%): Dashboard & Intel Hub */}
-                        <div className="flex-1 flex gap-4 min-h-0">
+                        {/* Resize Handle */}
+                        <div
+                            className="h-1 bg-gray-800 hover:bg-emerald-500 cursor-row-resize transition-colors w-full z-50 flex items-center justify-center opacity-50 hover:opacity-100"
+                            onMouseDown={(e) => {
+                                e.preventDefault();
+                                const startY = e.clientY;
+                                const startHeight = topHeight;
+                                const containerHeight = e.currentTarget.parentElement?.clientHeight || 0;
+
+                                const onMouseMove = (moveEvent: MouseEvent) => {
+                                    const deltaY = moveEvent.clientY - startY;
+                                    const deltaPercentage = (deltaY / containerHeight) * 100;
+                                    const newHeight = Math.min(Math.max(startHeight + deltaPercentage, 20), 80);
+                                    setTopHeight(newHeight);
+                                };
+
+                                const onMouseUp = () => {
+                                    document.removeEventListener('mousemove', onMouseMove);
+                                    document.removeEventListener('mouseup', onMouseUp);
+                                };
+
+                                document.addEventListener('mousemove', onMouseMove);
+                                document.addEventListener('mouseup', onMouseUp);
+                            }}
+                        >
+                            <div className="w-8 h-1 bg-gray-600 rounded-full"></div>
+                        </div>
+
+                        {/* Lower Section: Dashboard & Intel Hub */}
+                        <div style={{ height: `${100 - topHeight}%` }} className="flex gap-4 min-h-0 pt-2">
                             {/* Dashboard Panel (Positions/Orders) - 75% width */}
                             <div className="w-[75%] min-w-0">
                                 <DashboardPanel isAuthenticated={isAuthenticated} />
