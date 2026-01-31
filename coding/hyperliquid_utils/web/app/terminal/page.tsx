@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3, Newspaper } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import Sidebar from '@/components/Sidebar';
 import ChartWidget from '@/components/trading/ChartWidget';
@@ -297,7 +297,7 @@ export default function TradingTerminal() {
                                             : 'text-gray-500 hover:text-gray-300'
                                             }`}
                                     >
-                                        <NewsTicker className="w-4 h-4" />
+                                        <Newspaper className="w-4 h-4" />
                                         Intel & News
                                     </button>
                                 </div>
