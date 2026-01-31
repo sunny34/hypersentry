@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Newspaper, Flame, ExternalLink } from 'lucide-react';
 
 interface NewsTickerProps {
+interface NewsTickerProps extends React.HTMLAttributes<HTMLDivElement> {
     symbol: string;
 }
 
@@ -14,7 +15,7 @@ interface NewsItem {
     time: string;
 }
 
-export default function NewsTicker({ symbol }: NewsTickerProps) {
+export default function NewsTicker({ symbol, className, ...props }: NewsTickerProps) {
     const [news, setNews] = useState<NewsItem[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -53,7 +54,7 @@ export default function NewsTicker({ symbol }: NewsTickerProps) {
     }, [symbol]);
 
     return (
-        <div className="w-full bg-gradient-to-r from-blue-900/20 via-black/40 to-blue-900/20 border-y border-white/5 backdrop-blur-md h-10 flex items-center overflow-hidden relative">
+        <div className={`w-full bg-gradient-to-r from-blue-900/20 via-black/40 to-blue-900/20 border-y border-white/5 backdrop-blur-md h-10 flex items-center overflow-hidden relative ${className}`} {...props}>
             {/* Label */}
             <div className="bg-blue-600/20 h-full px-4 flex items-center gap-2 z-10 border-r border-blue-500/30 backdrop-blur-xl">
                 <Flame className="w-4 h-4 text-orange-500 animate-pulse" />
