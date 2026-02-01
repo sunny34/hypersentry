@@ -86,3 +86,24 @@ class UserTwap(Base):
             "token": self.token,
             "min_size": self.min_size
         }
+
+
+class UserKey(Base):
+    """Encrypted API Keys for users."""
+    __tablename__ = 'user_keys'
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    exchange = Column(String(50), nullable=False) # 'binance' or 'hyperliquid'
+    key_name = Column(String(100), nullable=True) # Optional label
+    
+    # Encrypted fields
+    api_key_enc = Column(Text, nullable=False) 
+    api_secret_enc = Column(Text, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship
+    user = relationship("User", back_populates="keys")
+
+User.keys = relationship("UserKey", back_populates="user", cascade="all, delete-orphan")

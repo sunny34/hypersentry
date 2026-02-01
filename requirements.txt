@@ -84,3 +84,5 @@ python-jose[cryptography]
 
 # HTTP client for OAuth
 httpx
+pandas
+numpy

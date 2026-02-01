@@ -16,6 +16,8 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import DashboardPanel from '@/components/trading/DashboardPanel';
 import TokenSelector from '@/components/trading/TokenSelector';
 import TimeframeSelector from '@/components/trading/TimeframeSelector';
+import AddWalletModal from '@/components/modals/AddWalletModal';
+import ImportModal from '@/components/modals/ImportModal';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -45,6 +47,8 @@ export default function TradingTerminal() {
     const [topHeight, setTopHeight] = useState(50); // Percent height of top section
     const [showHeatmap, setShowHeatmap] = useState(false); // Default hidden per user request
     const [notification, setNotification] = useState<{ title: string; message: string; type: 'bullish' | 'bearish' | 'neutral' } | null>(null);
+    const [showAdd, setShowAdd] = useState(false);
+    const [showImport, setShowImport] = useState(false);
 
     const getAuthConfig = useCallback(() => {
         return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
@@ -146,7 +150,12 @@ export default function TradingTerminal() {
 
     return (
         <div className="h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white flex overflow-hidden">
-            <Sidebar currentView="terminal" onViewChange={() => { }} />
+            <Sidebar
+                currentView="terminal"
+                onViewChange={() => { }}
+                onImport={() => setShowImport(true)}
+                onAdd={() => setShowAdd(true)}
+            />
 
             <main className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'} h-full`}>
 
@@ -358,11 +367,11 @@ export default function TradingTerminal() {
                             </div>
 
                             {/* Intel Hub (AI & News) - 25% width */}
-                            <div className="w-[25%] bg-gray-900/40 border border-gray-800/50 rounded-2xl p-4 backdrop-blur-sm flex flex-col min-w-0">
-                                <div className="flex items-center gap-2 mb-4 border-b border-gray-700/50 pb-2">
+                            <div className="w-[25%] bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm flex flex-col min-w-0">
+                                <div className="flex items-center gap-2 p-3 border-b border-gray-700/50">
                                     <button
                                         onClick={() => setActiveTab('analysis')}
-                                        className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'analysis'
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 ${activeTab === 'analysis'
                                             ? 'bg-blue-500/20 text-blue-400'
                                             : 'text-gray-500 hover:text-gray-300'
                                             }`}
@@ -372,13 +381,13 @@ export default function TradingTerminal() {
                                     </button>
                                     <button
                                         onClick={() => setActiveTab('news')}
-                                        className={`px-3 py-1.5 rounded-lg text-sm font-bold transition flex items-center gap-2 ${activeTab === 'news'
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 ${activeTab === 'news'
                                             ? 'bg-purple-500/20 text-purple-400'
                                             : 'text-gray-500 hover:text-gray-300'
                                             }`}
                                     >
-                                        <Newspaper className="w-4 h-4" />
-                                        Intel & News
+                                        <Newspaper className="w-3.5 h-3.5" />
+                                        Intel
                                     </button>
                                 </div>
 
@@ -394,6 +403,8 @@ export default function TradingTerminal() {
                     </div>
                 </div>
             </main>
+            <AddWalletModal isOpen={showAdd} onClose={() => setShowAdd(false)} onSuccess={() => { }} />
+            <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onSuccess={() => { }} />
         </div>
     );
 }

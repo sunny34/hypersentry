@@ -1,4 +1,22 @@
-import { Activity, Zap, Upload, Plus, LayoutDashboard, LogOut, User as UserIcon, BarChart3, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+    LayoutDashboard,
+    Activity,
+    Wallet,
+    Settings,
+    LogOut,
+    ChevronLeft,
+    ChevronRight,
+    Terminal,
+    Menu,
+    X,
+    MessageSquare,
+    Globe,
+    Zap,
+    Upload,
+    Plus,
+    User as UserIcon,
+    BarChart3
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useState } from 'react';
 import axios from 'axios';
@@ -22,12 +40,29 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
     const router = useRouter();
     const pathname = usePathname();
 
+    // Helper function to determine view from path
+    const getPathView = (path: string) => {
+        if (path === '/') return 'dashboard';
+        if (path.includes('/terminal')) return 'terminal';
+        if (path.includes('/strategies')) return 'strategies';
+        if (path.includes('/arb')) return 'arb';
+        return 'dashboard';
+    };
+
     // Support both patterns
-    const activeView = currentView || view || (pathname === '/terminal' ? 'terminal' : 'dashboard');
+    const activeView = currentView || view || getPathView(pathname);
     const handleViewChange = (newView: string) => {
         if (newView === 'terminal') {
             router.push('/terminal');
-        } else if (pathname === '/terminal') {
+        } else if (newView === 'strategies') {
+            router.push('/strategies');
+        } else if (newView === 'arb') {
+            router.push('/arb');
+        } else if (newView === 'risk') {
+            router.push('/risk');
+        } else if (newView === 'settings') {
+            router.push('/settings');
+        } else if (pathname === '/terminal' || pathname === '/strategies' || pathname === '/arb' || pathname === '/risk') {
             router.push('/');
         } else {
             setView?.(newView);
@@ -39,9 +74,9 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
         e.preventDefault();
         try {
             await axios.post(
-                `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/auth/profile/update`,
+                `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'} /auth/profile / update`,
                 { telegram_chat_id: chatId },
-                { headers: { Authorization: `Bearer ${token}` } }
+                { headers: { Authorization: `Bearer ${token} ` } }
             );
             setShowTelegram(false);
             window.location.reload(); // Reload to refresh user context
@@ -105,6 +140,41 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
                 >
                     <Activity className="w-5 h-5 shrink-0" />
                     {!isCollapsed && <span className="font-medium whitespace-nowrap">Whale Monitor</span>}
+                </button>
+
+                <button
+                    onClick={() => handleViewChange('strategies')}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'strategies' ? 'bg-[#00ff9d]/10 text-[#00ff9d]' : 'text-gray-400 hover:bg-gray-900 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
+                    title={isCollapsed ? "Strategies" : ""}
+                >
+                    <Activity className="w-5 h-5 shrink-0" />
+                    {!isCollapsed && <span className="font-medium whitespace-nowrap">Strategies</span>}
+                </button>
+
+                <button
+                    onClick={() => handleViewChange('arb')}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'arb' ? 'bg-[#00ff9d]/10 text-[#00ff9d]' : 'text-gray-400 hover:bg-gray-900 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
+                    title={isCollapsed ? "Arb Scanner" : ""}
+                >
+                    <Globe className="w-5 h-5 shrink-0" />
+                    {!isCollapsed && <span className="font-medium whitespace-nowrap">Arb Scanner</span>}
+                </button>
+
+                <button
+                    onClick={() => handleViewChange('risk')}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'risk' ? 'bg-[#00ff9d]/10 text-[#00ff9d]' : 'text-gray-400 hover:bg-gray-900 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
+                    title={isCollapsed ? "Risk Simulator" : ""}
+                >
+                    <Zap className="w-5 h-5 shrink-0" />
+                    {!isCollapsed && <span className="font-medium whitespace-nowrap">Risk Simulator</span>}
+                </button>
+                <button
+                    onClick={() => handleViewChange('settings')}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'settings' ? 'bg-[#00ff9d]/10 text-[#00ff9d]' : 'text-gray-400 hover:bg-gray-900 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
+                    title={isCollapsed ? "Settings" : ""}
+                >
+                    <Settings className="w-5 h-5 shrink-0" />
+                    {!isCollapsed && <span className="font-medium whitespace-nowrap">Settings</span>}
                 </button>
 
                 {/* Actions Grid - Only show when authenticated */}
