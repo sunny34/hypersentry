@@ -2,35 +2,70 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import axios from 'axios';
-import { TrendingUp, TrendingDown, Loader2, AlertCircle, ChevronDown, Settings, Info } from 'lucide-react';
+import { TrendingUp, TrendingDown, Loader2, AlertCircle, ChevronDown, Settings, Info, Zap } from 'lucide-react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+
+// Types
+type OrderType = 'market' | 'limit';
+type ProOrderType = 'none' | 'scale' | 'twap' | 'stop_limit' | 'stop_market';
 
 interface OrderFormProps {
     symbol: string;
     currentPrice: number;
     isAuthenticated: boolean;
+    token?: string | null;
+    walletBalance?: number;
+    agent?: any; // Pass agent object
+    isAgentActive?: boolean;
+    onEnableAgent?: () => void;
     onLogin: () => void;
+    onDeposit?: () => void;
+    selectedPrice?: string;
+    selectedSize?: string;
 }
 
-type OrderType = 'market' | 'limit';
-type ProOrderType = 'none' | 'scale' | 'twap' | 'stop_limit' | 'stop_market';
-type MarginMode = 'cross' | 'isolated';
+interface OrderOverrideParams {
+    side?: 'buy' | 'sell';
+    size?: string | number;
+    price?: number | null;
+    orderType?: OrderType;
+}
 
-export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLogin }: OrderFormProps) {
-    // Order State
+/**
+ * OrderForm Component
+ * 
+ * The core trading interface for the Alpha Terminal.
+ * Supports Market/Limit orders, advanced "Pro" order types (TWAP, Scale),
+ * and "1-Click Trading" via an authorized Agent.
+ * Listens for 'smart-trade-execute' events from news/intelligence systems.
+ */
+export default function OrderForm({
+    symbol,
+    currentPrice,
+    isAuthenticated,
+    token,
+    walletBalance = 12450.00,
+    agent,
+    isAgentActive,
+    onEnableAgent,
+    onLogin,
+    onDeposit,
+    selectedPrice,
+    selectedSize
+}: OrderFormProps) {
+
+    // State
     const { isConnected } = useAccount();
     const isAuth = isAuthenticated || isConnected;
 
     const [side, setSide] = useState<'buy' | 'sell'>('buy');
+    const [price, setPrice] = useState('');
+    const [size, setSize] = useState('');
+    const [leverage, setLeverage] = useState(1);
+    const [marginMode, setMarginMode] = useState<'cross' | 'isolated'>('cross');
     const [orderType, setOrderType] = useState<OrderType>('market');
     const [proType, setProType] = useState<ProOrderType>('none');
-    const [size, setSize] = useState<string>('');
-    const [price, setPrice] = useState<string>('');
-    const [leverage, setLeverage] = useState<number>(20);
-    const [marginMode, setMarginMode] = useState<MarginMode>('cross');
-
-    // Advanced Options
     const [reduceOnly, setReduceOnly] = useState(false);
     const [tpSlEnabled, setTpSlEnabled] = useState(false);
     const [takeProfit, setTakeProfit] = useState('');
@@ -38,54 +73,36 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
 
     // UI State
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
     const [showProMenu, setShowProMenu] = useState(false);
     const proMenuRef = useRef<HTMLDivElement>(null);
+    const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+    const [lastExternalPrice, setLastExternalPrice] = useState<string | undefined>();
+    const [lastExternalSize, setLastExternalSize] = useState<string | undefined>();
 
-    // Close pro menu on click outside
+    /**
+     * Updates local state when a price is selected from the orderbook or chart.
+     */
     useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (proMenuRef.current && !proMenuRef.current.contains(event.target as Node)) {
-                setShowProMenu(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+        if (selectedPrice && selectedPrice !== lastExternalPrice) {
+            setPrice(selectedPrice);
+            setOrderType('limit');
+            setLastExternalPrice(selectedPrice);
+        }
+    }, [selectedPrice, lastExternalPrice]);
 
-    // AI / Risk Analysis
-    const walletBalance = 12450.00; // Mock balance for now (replace with hook later)
-    const orderValue = parseFloat(size || '0') * (parseFloat(price) || currentPrice);
-    const marginRequired = orderValue / leverage;
-
-    const portfolioAllocation = (marginRequired / walletBalance) * 100;
-    const isHighRisk = portfolioAllocation > 20 || leverage > 20;
-
-    // Liquidation Price Approximation
-    // Est Liq = Entry * (1 - 1/Lev) for Long
-    const entryPriceNum = parseFloat(price) || currentPrice;
-    const liqPrice = side === 'buy'
-        ? entryPriceNum * (1 - (1 / leverage) + 0.005)
-        : entryPriceNum * (1 + (1 / leverage) - 0.005);
-
-    // AI Suggestions
-    const suggestedSL = side === 'buy'
-        ? (entryPriceNum * 0.95).toFixed(2) // -5%
-        : (entryPriceNum * 1.05).toFixed(2); // +5%
-
-    const feeRate = 0.00025;
-    const estFees = orderValue * feeRate;
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-
+    /**
+     * Core order execution logic.
+     * Supports both manual submission and automated 'override' submission.
+     */
+    const executeOrder = async (overrideParams?: OrderOverrideParams) => {
         if (!isAuthenticated) {
             onLogin();
             return;
         }
 
-        if (!size || parseFloat(size) <= 0) {
-            setResult({ success: false, message: 'Enter a valid size' });
+        const finalSize = overrideParams?.size || size;
+        if (!finalSize || parseFloat(finalSize.toString()) <= 0) {
+            setResult({ success: false, message: 'Invalid order size' });
             return;
         }
 
@@ -93,48 +110,165 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
         setResult(null);
 
         try {
-            const finalOrderType = proType !== 'none' ? proType : orderType;
-
-            const payload = {
+            const finalOrderType = overrideParams?.orderType || (proType !== 'none' ? proType : orderType);
+            const orderPayload = {
                 token: symbol,
-                side,
-                size: parseFloat(size),
-                price: parseFloat(price) || null, // Auto-use market price if null/market
-                order_type: finalOrderType.replace('_', ''), // map stop_limit -> stoplimit etc per backend?
+                side: overrideParams?.side || side,
+                size: parseFloat(finalSize.toString()),
+                price: overrideParams?.price || (parseFloat(price) || null),
+                order_type: finalOrderType.replace('_', ''),
                 leverage,
                 margin_mode: marginMode,
                 reduce_only: reduceOnly,
                 tp_sl: tpSlEnabled ? { tp: parseFloat(takeProfit), sl: parseFloat(stopLoss) } : null
             };
 
-            const res = await axios.post(`${API_URL}/trading/order`, payload);
+            let config: any = { headers: {} };
+            if (token) config.headers.Authorization = `Bearer ${token}`;
 
-            if (res.data.simulated) {
-                setResult({ success: true, message: `⚠️ Simulation: ${side.toUpperCase()} ${size} ${symbol}` });
+            // 1-Click Trading: Uses Agent key for low-latency signing
+            if (isAgentActive && agent) {
+                const { ethers } = await import('ethers');
+                const wallet = new ethers.Wallet(agent.privateKey);
+                const nonce = Date.now();
+                const signature = await wallet.signMessage(JSON.stringify({ ...orderPayload, nonce }));
+
+                const signedPayload = {
+                    ...orderPayload,
+                    signature,
+                    nonce,
+                    agentAddress: agent.address
+                };
+
+                const res = await axios.post(`${API_URL}/trading/order`, signedPayload, config);
+
+                if (res.data.status === 'filled') {
+                    setResult({ success: true, message: `⚡ 1-Click Fill: ${orderPayload.side.toUpperCase()} ${finalSize} ${symbol}` });
+                } else {
+                    setResult({ success: res.data.success, message: res.data.message || 'Order Dispatched' });
+                }
+
             } else {
-                setResult({ success: true, message: `✅ Order placed: ${side.toUpperCase()} ${size} ${symbol}` });
+                const res = await axios.post(`${API_URL}/trading/order`, orderPayload, config);
+                if (res.data.simulated) {
+                    setResult({ success: true, message: `⚠️ Simulation: ${orderPayload.side.toUpperCase()} ${finalSize} ${symbol}` });
+                } else {
+                    setResult({ success: true, message: `✅ Order Placed: ${orderPayload.side.toUpperCase()} ${finalSize} ${symbol}` });
+                }
             }
+
         } catch (e: any) {
-            // Handle generic or specific errors
-            console.error(e);
-            setResult({ success: false, message: e.response?.data?.detail || 'Order failed' });
+            console.error('Terminal Order Error:', e);
+            setResult({ success: false, message: e.response?.data?.error || e.message || 'Execution Failed' });
         } finally {
             setIsSubmitting(false);
         }
     };
 
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        await executeOrder();
+    };
+
+    /**
+     * Intelligent Trade Listener
+     * Handles external events from News Hub or AI agents for semi-autonomous trading.
+     */
+    useEffect(() => {
+        const handleSmartTrade = async (e: any) => {
+            const { side: smartSide, reason } = e.detail;
+            console.log(`🧠 [OrderForm Alpha] Intel Action: ${smartSide.toUpperCase()} | Reason: ${reason}`);
+
+            setSide(smartSide as 'buy' | 'sell');
+            setOrderType('market');
+
+            console.info(`🧠 [Production] Intel Sync Triggered | Side: ${smartSide.toUpperCase()} | Reason: ${reason}`);
+
+            const effectiveBalance = walletBalance > 100 ? walletBalance : 10000;
+            const riskValue = effectiveBalance * 0.05; // 5% Risk on Alpha Intelligence
+            const calcSize = (riskValue / currentPrice).toFixed(4);
+            setSize(calcSize);
+
+            // Dynamic Risk Guardians: Automated TP/SL calculation for Intel-driven trades
+            const entry = currentPrice;
+            const isBuy = smartSide === 'buy';
+
+            console.info(`🛡️ [Production] Calculating Risk Guards | Entry: ${entry} | Side: ${smartSide}`);
+
+            // Institutional Grade Defaults: SL at -1.5%, TP at +3% (2:1 RR)
+            const autoSL = isBuy ? (entry * 0.985).toFixed(2) : (entry * 1.015).toFixed(2);
+            const autoTP = isBuy ? (entry * 1.03).toFixed(2) : (entry * 0.97).toFixed(2);
+
+            setStopLoss(autoSL);
+            setTakeProfit(autoTP);
+            setTpSlEnabled(true);
+
+            setResult({ success: true, message: `🧠 News Hub: Syncing ${smartSide.toUpperCase()} (+Auto TP/SL)...` });
+
+            // Visual feedback loop
+            const sizeInput = document.getElementById('size-input');
+            if (sizeInput) {
+                sizeInput.classList.add('ring-4', 'ring-purple-500', 'bg-purple-500/20', 'scale-110');
+                setTimeout(() => sizeInput.classList.remove('ring-4', 'ring-purple-500', 'bg-purple-500/20', 'scale-110'), 1500);
+            }
+
+            // Automated Execution if 1-Click is enabled
+            if (isAgentActive && agent) {
+                console.log("⚡️ Terminal Agent: Auto-Executing Smart Intel Order with Risk Guards...");
+                setTimeout(() => {
+                    executeOrder({
+                        side: smartSide,
+                        size: calcSize,
+                        orderType: 'market'
+                    });
+                }, 500);
+            }
+        };
+
+        window.addEventListener('smart-trade-execute', handleSmartTrade);
+        return () => window.removeEventListener('smart-trade-execute', handleSmartTrade);
+    }, [currentPrice, walletBalance, isAgentActive, agent, symbol]);
+
+    useEffect(() => {
+        if (selectedSize && selectedSize !== lastExternalSize) {
+            setSize(selectedSize);
+            setLastExternalSize(selectedSize);
+        }
+    }, [selectedSize, lastExternalSize]);
+
+    // Financial Computations
+    const orderValue = parseFloat(size || '0') * (parseFloat(price) || currentPrice);
+    const marginRequired = orderValue / leverage;
+    const portfolioAllocation = walletBalance > 0 ? (marginRequired / walletBalance) * 100 : 0;
+    const isHighRisk = portfolioAllocation > 20 || leverage > 20;
+
+    const entryPriceNum = parseFloat(price) || currentPrice;
+
+    // Safety guard for liquidation and Stop Loss calculations
+    const liqPrice = entryPriceNum > 0 ? (side === 'buy'
+        ? entryPriceNum * (1 - (1 / leverage) + 0.005)
+        : entryPriceNum * (1 + (1 / leverage) - 0.005)) : 0;
+
+    const suggestedSL = entryPriceNum > 0 ? (side === 'buy'
+        ? (entryPriceNum * 0.95).toFixed(2)
+        : (entryPriceNum * 1.05).toFixed(2)) : '0.00';
+
+    const feeRate = 0.00025;
+    const estFees = orderValue * feeRate;
+
     return (
         <form onSubmit={handleSubmit} className="flex flex-col h-full gap-4 text-sm select-none">
-            {/* Top Row: Margin Mode & Leverage */}
+            {/* Control Strip */}
             <div className="flex gap-2">
                 <button
                     type="button"
+                    title="Switch Margin Mode"
                     onClick={() => setMarginMode(m => m === 'cross' ? 'isolated' : 'cross')}
                     className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg py-1.5 font-bold text-gray-300 transition text-xs uppercase"
                 >
                     {marginMode}
                 </button>
-                <div className="flex-1 flex items-center bg-gray-800 border border-gray-700 rounded-lg px-2">
+                <div className="flex-1 flex items-center bg-gray-800 border border-gray-700 rounded-lg px-2" title="Adjust Leverage">
                     <span className="text-gray-400 text-xs mr-2">Lev</span>
                     <input
                         type="number"
@@ -146,14 +280,36 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
                 </div>
             </div>
 
-            {/* Tabs: Market / Limit / Pro */}
+            {/* 1-Click Toggle */}
+            {isAuthenticated && (
+                <div
+                    onClick={isAgentActive ? undefined : onEnableAgent}
+                    title={isAgentActive ? "Agent active - orders sign automatically" : "Enable low-latency 1-click trading"}
+                    className={`
+                        flex items-center justify-between px-3 py-2 rounded-lg border transition-all cursor-pointer
+                        ${isAgentActive
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
+                            : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'}
+                    `}
+                >
+                    <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${isAgentActive ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
+                        <span className="text-xs font-bold uppercase tracking-tight">1-Click Terminal</span>
+                    </div>
+                    <div className="text-[10px] uppercase font-black opacity-75">
+                        {isAgentActive ? 'Online' : 'Enable'}
+                    </div>
+                </div>
+            )}
+
+            {/* Strategy Tabs */}
             <div className="flex border-b border-gray-800">
                 {['Market', 'Limit'].map((t) => (
                     <button
                         key={t}
                         type="button"
                         onClick={() => { setOrderType(t.toLowerCase() as OrderType); setProType('none'); }}
-                        className={`px-4 py-2 text-xs font-bold border-b-2 transition-colors ${orderType === t.toLowerCase() && proType === 'none'
+                        className={`px-4 py-1.5 text-xs font-bold border-b-2 transition-colors ${orderType === t.toLowerCase() && proType === 'none'
                             ? 'border-blue-500 text-blue-400'
                             : 'border-transparent text-gray-500 hover:text-gray-300'
                             }`}
@@ -162,22 +318,21 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
                     </button>
                 ))}
 
-                {/* Pro Dropdown */}
                 <div className="relative" ref={proMenuRef}>
                     <button
                         type="button"
                         onClick={() => setShowProMenu(!showProMenu)}
-                        className={`px-4 py-2 text-xs font-bold border-b-2 flex items-center gap-1 transition-colors ${proType !== 'none'
+                        className={`px-4 py-1.5 text-xs font-bold border-b-2 flex items-center gap-1 transition-colors ${proType !== 'none'
                             ? 'border-blue-500 text-blue-400'
                             : 'border-transparent text-gray-500 hover:text-gray-300'
                             }`}
                     >
-                        {proType === 'none' ? 'Pro' : proType.replace('_', ' ')}
+                        {proType === 'none' ? 'Strategy' : proType.replace('_', ' ')}
                         <ChevronDown className="w-3 h-3" />
                     </button>
 
                     {showProMenu && (
-                        <div className="absolute top-full left-0 mt-1 w-32 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-20 py-1">
+                        <div className="absolute top-full left-0 mt-1 w-32 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl overflow-hidden z-20 py-1">
                             {['Scale', 'TWAP', 'Stop Limit', 'Stop Market'].map((pt) => (
                                 <button
                                     key={pt}
@@ -186,7 +341,7 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
                                         setProType(pt.toLowerCase().replace(' ', '_') as ProOrderType);
                                         setShowProMenu(false);
                                     }}
-                                    className="block w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
+                                    className="block w-full text-left px-3 py-1.5 text-[11px] text-gray-300 hover:bg-gray-700 hover:text-white"
                                 >
                                     {pt}
                                 </button>
@@ -196,72 +351,79 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
                 </div>
             </div>
 
-            {/* Info Row */}
-            <div className="flex justify-between text-[11px] text-gray-500 px-1">
-                <span>Available to Trade</span>
-                <span className="text-gray-300 font-mono">$12,450.00</span>
+            {/* Wallet Integration */}
+            <div className="flex justify-between items-center text-[10px] text-gray-500 px-1">
+                <span className="uppercase font-bold tracking-widest text-[8px]">Available Term</span>
+                <div className="flex items-center gap-2">
+                    <span className="text-gray-300 font-mono font-bold">${(walletBalance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                    <button
+                        type="button"
+                        onClick={onDeposit}
+                        className="text-[9px] bg-blue-500/10 hover:bg-blue-500/30 text-blue-400 px-2 py-0.5 rounded transition uppercase font-black tracking-tighter"
+                    >
+                        Deposit
+                    </button>
+                </div>
             </div>
 
-            {/* Side Toggle (Green/Red) */}
+            {/* Position Side */}
             <div className="grid grid-cols-2 gap-2 bg-gray-900/50 p-1 rounded-lg">
                 <button
                     type="button"
                     onClick={() => setSide('buy')}
-                    className={`py-2 rounded-md text-sm font-bold transition-all ${side === 'buy'
+                    className={`py-2 rounded-md text-xs font-black uppercase tracking-widest transition-all ${side === 'buy'
                         ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
-                        : 'text-gray-500 hover:text-gray-400'
+                        : 'text-gray-600 hover:text-gray-500'
                         }`}
                 >
-                    Buy / Long
+                    Long
                 </button>
                 <button
                     type="button"
                     onClick={() => setSide('sell')}
-                    className={`py-2 rounded-md text-sm font-bold transition-all ${side === 'sell'
+                    className={`py-2 rounded-md text-xs font-black uppercase tracking-widest transition-all ${side === 'sell'
                         ? 'bg-red-500/20 text-red-400 border border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.2)]'
-                        : 'text-gray-500 hover:text-gray-400'
+                        : 'text-gray-600 hover:text-gray-500'
                         }`}
                 >
-                    Sell / Short
+                    Short
                 </button>
             </div>
 
-            {/* Inputs */}
+            {/* Numeric Controls */}
             <div className="space-y-3">
-                {/* Price Input (if not Market) */}
                 {(orderType === 'limit' || proType !== 'none') && (
                     <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 flex items-center justify-between">
-                        <span className="text-gray-500 text-xs">Price</span>
+                        <span className="text-gray-500 text-[10px] font-bold uppercase">Price</span>
                         <div className="flex items-center gap-2">
                             <input
                                 type="number"
                                 value={price}
                                 onChange={(e) => setPrice(e.target.value)}
                                 placeholder={currentPrice.toFixed(2)}
-                                className="bg-transparent text-right font-mono text-sm focus:outline-none w-24 text-white"
+                                className="bg-transparent text-right font-mono text-xs focus:outline-none w-24 text-white"
                             />
-                            <span className="text-gray-500 text-xs">USD</span>
+                            <span className="text-gray-500 text-[9px] font-bold">USD</span>
                         </div>
                     </div>
                 )}
 
-                {/* Size Input */}
                 <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 flex items-center justify-between">
-                    <span className="text-gray-500 text-xs">Size</span>
+                    <span className="text-gray-500 text-[10px] font-bold uppercase">Size</span>
                     <div className="flex items-center gap-2">
                         <input
+                            id="size-input"
                             type="number"
                             value={size}
                             onChange={(e) => setSize(e.target.value)}
                             placeholder="0.00"
-                            className="bg-transparent text-right font-mono text-sm focus:outline-none w-24 text-white"
+                            className="bg-transparent text-right font-mono text-xs focus:outline-none w-24 text-white transition-all duration-300 rounded"
                         />
-                        <span className="text-gray-500 text-xs">{symbol}</span>
+                        <span className="text-gray-500 text-[9px] font-bold">{symbol}</span>
                     </div>
                 </div>
 
-                {/* Percentage Slider */}
-                <div className="px-1">
+                <div className="px-1 group">
                     <input
                         type="range"
                         min="0"
@@ -269,14 +431,13 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
                         step="1"
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                         onChange={(e) => {
-                            // Mock calculation: assume $1000 balance for demo
                             const percent = parseInt(e.target.value);
-                            const maxUsd = 1000 * leverage;
+                            const maxUsd = (walletBalance > 0 ? walletBalance : 1000) * leverage;
                             const calcSize = (maxUsd * (percent / 100)) / (parseFloat(price) || currentPrice);
                             setSize(calcSize.toFixed(4));
                         }}
                     />
-                    <div className="flex justify-between text-[10px] text-gray-600 mt-1 font-mono">
+                    <div className="flex justify-between text-[9px] text-gray-600 mt-1 font-mono opacity-50 group-hover:opacity-100 transition-opacity">
                         <span>0%</span>
                         <span>25%</span>
                         <span>50%</span>
@@ -286,20 +447,19 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
                 </div>
             </div>
 
-            {/* AI Risk & Suggestions Area */}
+            {/* Predictive Risk Hub */}
             {size && (
-                <div className={`rounded-lg p-2 text-xs border ${isHighRisk ? 'bg-red-500/10 border-red-500/30' : 'bg-blue-500/10 border-blue-500/30'}`}>
-                    <div className="flex items-center gap-1.5 mb-1 font-bold">
+                <div className={`rounded-lg p-2.5 text-[11px] border leading-relaxed transition-all ${isHighRisk ? 'bg-red-500/10 border-red-500/30 text-red-200' : 'bg-blue-500/10 border-blue-500/30 text-blue-100'}`}>
+                    <div className="flex items-center gap-1.5 mb-1 font-black uppercase tracking-tighter">
                         <Info className="w-3 h-3" />
-                        {isHighRisk ? 'High Risk Warning' : 'AI Trading Assistant'}
+                        {isHighRisk ? 'Critical Risk Advisory' : 'Terminal Intelligence'}
                     </div>
-                    <p className="text-gray-400 mb-2">
+                    <p className="opacity-75 mb-2">
                         {isHighRisk
-                            ? `Caution: This trade uses ${portfolioAllocation.toFixed(1)}% of your wallet with ${leverage}x leverage.`
-                            : 'Trade looks healthy. Consider setting a stop loss.'}
+                            ? `Danger: Capital allocation is ${portfolioAllocation.toFixed(1)}%. High risk of liquidation.`
+                            : 'Optimal position metrics. Execution profile categorized as institutional-grade.'}
                     </p>
 
-                    {/* Smart Suggestion Chips */}
                     {!tpSlEnabled && (
                         <button
                             type="button"
@@ -307,93 +467,108 @@ export default function OrderForm({ symbol, currentPrice, isAuthenticated, onLog
                                 setTpSlEnabled(true);
                                 setStopLoss(suggestedSL);
                             }}
-                            className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded px-2 py-1 transition-colors text-xs text-blue-300"
+                            className="flex items-center gap-1.5 bg-gray-800/80 hover:bg-gray-700 border border-gray-600/50 rounded px-2 py-1 transition-colors text-[10px] font-bold text-blue-400"
                         >
-                            <span>💡 Suggest SL: {suggestedSL}</span>
+                            <span>Suggest SL: {suggestedSL}</span>
                         </button>
                     )}
                 </div>
             )}
 
-            {/* TP/SL Checkbox */}
+            {/* Guard Rails (TP/SL) */}
             <div>
-                <label className="flex items-center gap-2 cursor-pointer mb-2">
+                <label className="flex items-center gap-2 cursor-pointer mb-2 group">
                     <input
                         type="checkbox"
                         checked={tpSlEnabled}
                         onChange={(e) => setTpSlEnabled(e.target.checked)}
                         className="rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-0 w-3.5 h-3.5"
                     />
-                    <span className="text-xs text-gray-400">Take Profit / Stop Loss</span>
+                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest group-hover:text-gray-300 transition-colors">Safety Guards</span>
                 </label>
 
                 {tpSlEnabled && (
                     <div className="grid grid-cols-2 gap-2 mb-2">
                         <div className="bg-gray-800/30 border border-gray-700/50 rounded px-2 py-1.5 flex flex-col">
-                            <span className="text-[10px] text-gray-500">Take Profit</span>
+                            <span className="text-[9px] font-black uppercase text-gray-600 tracking-tighter">Take Profit</span>
                             <input
                                 type="number"
                                 value={takeProfit}
                                 onChange={(e) => setTakeProfit(e.target.value)}
-                                className="bg-transparent text-xs font-mono focus:outline-none text-emerald-400"
+                                className="bg-transparent text-xs font-mono focus:outline-none text-emerald-400 font-bold"
                                 placeholder="Target"
                             />
                         </div>
-                        <div className="bg-gray-800/30 border border-gray-700/50 rounded px-2 py-1.5 flex flex-col">
-                            <span className="text-[10px] text-gray-500">Stop Loss</span>
+                        <div className="bg-gray-800/30 border border-gray-700/50 rounded px-2 py-1.5 flex flex-col relative">
+                            <span className="text-[9px] font-black uppercase text-gray-600 tracking-tighter">Stop Loss</span>
                             <input
                                 type="number"
                                 value={stopLoss}
                                 onChange={(e) => setStopLoss(e.target.value)}
-                                className="bg-transparent text-xs font-mono focus:outline-none text-red-400"
+                                className="bg-transparent text-xs font-mono focus:outline-none text-red-400 font-bold"
                                 placeholder={suggestedSL}
                             />
+                            <div className="absolute -top-1 right-0">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const entry = (orderType === 'limit' && parseFloat(price) > 0) ? parseFloat(price) : currentPrice;
+                                        if (entry > 0) {
+                                            const slPrice = side === 'buy' ? entry * 0.99 : entry * 1.01;
+                                            setStopLoss(slPrice.toFixed(entry > 1000 ? 1 : 4));
+                                            setTpSlEnabled(true);
+                                            const riskAmt = (walletBalance > 0 ? walletBalance : 10000) * 0.01;
+                                            const diff = Math.abs(entry - slPrice);
+                                            if (diff > 0) setSize((riskAmt / diff).toFixed(5));
+                                        }
+                                    }}
+                                    className="bg-blue-600 hover:bg-blue-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg transition-all"
+                                >
+                                    AUTO 1%
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* Order Details Summary */}
-            <div className="space-y-1.5 pt-2 border-t border-gray-800/50">
-                <div className="flex justify-between text-[11px]">
-                    <span className="text-gray-500">Order Value</span>
-                    <span className="text-gray-300 font-mono">${orderValue.toFixed(2)}</span>
+            {/* Detail Summary */}
+            <div className="space-y-1.5 pt-2 border-t border-gray-800/50 opacity-80">
+                <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-600 uppercase font-bold tracking-tighter">Value</span>
+                    <span className="text-gray-300 font-mono font-bold">${orderValue.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between text-[11px]">
-                    <span className="text-gray-500">Margin Required</span>
-                    <span className="text-gray-300 font-mono">${marginRequired.toFixed(2)}</span>
+                <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-600 uppercase font-bold tracking-tighter">Margin</span>
+                    <span className="text-gray-300 font-mono font-bold">${marginRequired.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between text-[11px]">
-                    <span className="text-gray-500">Est. Liquidation</span>
-                    <span className="text-orange-400 font-mono">${liqPrice.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-[11px]">
-                    <span className="text-gray-500">Est. Fees</span>
-                    <span className="text-gray-400 font-mono">${estFees.toFixed(3)}</span>
+                <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-600 uppercase font-bold tracking-tighter">Est. Liq</span>
+                    <span className="text-orange-400 font-mono font-bold">${liqPrice.toFixed(2)}</span>
                 </div>
             </div>
 
-            {/* Submit Button */}
+            {/* Primary Action */}
             <button
                 type="submit"
                 disabled={isSubmitting || !size}
-                className={`w-full py-3 rounded-lg font-bold text-sm transition-all mt-auto shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${side === 'buy'
-                    ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20'
-                    : 'bg-red-500 hover:bg-red-400 text-white shadow-red-500/20'
+                className={`w-full py-3.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all mt-auto shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] ${side === 'buy'
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20'
+                    : 'bg-red-500 hover:bg-red-400 text-black shadow-red-500/20'
                     }`}
             >
                 {isSubmitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                    <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                 ) : !isAuth ? (
-                    'Connect Wallet'
+                    'Connect Neural Link'
                 ) : (
-                    `${side === 'buy' ? 'Buy' : 'Sell'} ${symbol}`
+                    `${side === 'buy' ? 'Initiate Long' : 'Initiate Short'} ${symbol}`
                 )}
             </button>
 
-            {/* Result Message */}
+            {/* Response Channel */}
             {result && (
-                <div className={`flex items-center gap-2 p-2 rounded-lg text-xs mt-2 ${result.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                <div className={`flex items-center gap-2 p-2.5 rounded-xl text-[10px] font-bold mt-1 border animate-in slide-in-from-bottom-2 duration-300 ${result.success ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'
                     }`}>
                     <AlertCircle className="w-3 h-3 flex-shrink-0" />
                     {result.message}

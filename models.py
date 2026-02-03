@@ -107,3 +107,26 @@ class UserKey(Base):
     user = relationship("User", back_populates="keys")
 
 User.keys = relationship("UserKey", back_populates="user", cascade="all, delete-orphan")
+
+class ActiveTrade(Base):
+    """Tracks active arbitrage positions for PnL monitoring."""
+    __tablename__ = 'active_trades'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    symbol = Column(String(20), nullable=False)
+    direction = Column(String(50), nullable=False) # e.g. "Long HL / Short Bin"
+    size_usd = Column(Float, nullable=False)
+    
+    # Entry Snapshot
+    entry_price_hl = Column(Float, nullable=True)
+    entry_price_bin = Column(Float, nullable=True)
+    entry_time = Column(DateTime(timezone=True), server_default=func.now())
+    
+    status = Column(String(20), default="OPEN") # OPEN, CLOSED, FAILED
+    
+    # Relationships
+    user = relationship("User", back_populates="trades")
+
+User.trades = relationship("ActiveTrade", back_populates="user", cascade="all, delete-orphan")

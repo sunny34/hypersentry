@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
-import { Activity, Shield, Zap, Trash2, Plus, Upload, X, TrendingUp, Eye, AlertTriangle, Sparkles, BarChart3, ExternalLink } from 'lucide-react';
+import { Activity, Shield, Zap, Trash2, Plus, Upload, X, TrendingUp, Eye, AlertTriangle, Sparkles, BarChart3, ExternalLink, Menu } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import BridgeAlerts from '@/components/BridgeAlerts';
 import { useAuth } from '@/contexts/AuthContext';
@@ -35,6 +35,7 @@ export default function Home() {
   const [showImport, setShowImport] = useState(false);
   const [showAllTwaps, setShowAllTwaps] = useState(false);
   const [view, setView] = useState('dashboard');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Create axios config with auth header
   const getAuthConfig = useCallback(() => {
@@ -125,9 +126,6 @@ export default function Home() {
     }
   };
 
-  // Show login prompt if not authenticated - removed to allow public view
-  // Authentication is now handled in the header
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-950 via-black to-gray-950 text-white font-sans selection:bg-emerald-500 selection:text-black flex">
       <Sidebar
@@ -135,16 +133,27 @@ export default function Home() {
         setView={setView}
         onImport={() => setShowImport(true)}
         onAdd={() => setShowAdd(true)}
+        isMobileOpen={mobileMenuOpen}
+        onMobileClose={() => setMobileMenuOpen(false)}
       />
 
-      <main className={`flex-1 p-8 overflow-y-auto transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
+      <main className={`flex-1 p-4 lg:p-8 overflow-y-auto transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'} ml-0`}>
         {/* Top Bar */}
         <header className="flex justify-between items-center mb-10">
-          <div>
-            <h1 className="text-3xl font-black tracking-tight bg-gradient-to-r from-emerald-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent">
-              {view === 'dashboard' ? 'Command Center' : view === 'twap' ? 'Whale Monitor' : 'Settings'}
-            </h1>
-            <p className="text-gray-500 text-sm mt-1">Real-time Hyperliquid intelligence</p>
+          <div className="flex items-center gap-3">
+            {/* Mobile Menu Button */}
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="lg:hidden p-2 hover:bg-gray-800 rounded-lg text-gray-400"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            <div>
+              <h1 className="text-2xl lg:text-3xl font-black tracking-tight bg-gradient-to-r from-emerald-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent">
+                {view === 'dashboard' ? 'Command Center' : view === 'twap' ? 'Whale Monitor' : 'Settings'}
+              </h1>
+              <p className="text-gray-500 text-xs lg:text-sm mt-1">Real-time Hyperliquid intelligence</p>
+            </div>
           </div>
 
           <div className="flex items-center gap-4">

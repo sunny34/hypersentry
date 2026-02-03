@@ -19,13 +19,13 @@ export default function SettingsPage() {
     const fetchKeys = async () => {
         if (!token) return;
         try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
             const res = await axios.get(`${apiUrl}/settings/keys`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             if (res.data.keys) setKeys(res.data.keys);
-        } catch (e) {
-            console.error("Failed to load keys", e);
+        } catch (e: any) {
+            console.error("Failed to load keys:", e.message, e.response?.data, e.toJSON ? e.toJSON() : e);
         } finally {
             setIsLoading(false);
         }
@@ -42,7 +42,7 @@ export default function SettingsPage() {
         }
 
         try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
             await axios.post(`${apiUrl}/settings/keys`, newKey, {
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -57,7 +57,7 @@ export default function SettingsPage() {
     const handleDelete = async (id: string) => {
         if (!confirm("Are you sure you want to delete this key?")) return;
         try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
             await axios.delete(`${apiUrl}/settings/keys/${id}`);
             fetchKeys();
         } catch (e) {

@@ -86,3 +86,4 @@ python-jose[cryptography]
 httpx
 pandas
 numpy
+websockets

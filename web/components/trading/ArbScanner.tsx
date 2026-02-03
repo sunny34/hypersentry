@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { ArrowRight, ExternalLink, RefreshCw, TrendingUp, AlertTriangle, DollarSign, Zap } from 'lucide-react';
 import axios from 'axios';
-
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 
@@ -23,6 +22,9 @@ export default function ArbScanner() {
     const [loading, setLoading] = useState(true);
     const [executing, setExecuting] = useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [activeTrades, setActiveTrades] = useState<any[]>([]);
+    const [binanceStatus, setBinanceStatus] = useState<string | null>(null);
+    const [hlStatus, setHlStatus] = useState<string | null>(null);
 
     const fetchArbData = async () => {
         setLoading(true);
@@ -37,11 +39,12 @@ export default function ArbScanner() {
                     binanceFunding: o.binanceFunding,
                     spread: o.spread,
                     direction: o.direction,
-                    // Confidence is high because data is real
                     confidence: 100
                 }));
                 setOpportunities(ops);
                 setLastUpdated(new Date());
+                setBinanceStatus(res.data.binance_status);
+                setHlStatus(res.data.hl_status);
             }
 
         } catch (e) {
@@ -51,11 +54,30 @@ export default function ArbScanner() {
         }
     };
 
+    const fetchActiveTrades = async () => {
+        if (!isAuthenticated) return;
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const res = await axios.get(`${apiUrl}/trading/active`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setActiveTrades(res.data.trades);
+        } catch (e) {
+            console.error("Failed to fetch active trades", e);
+        }
+    };
+
     useEffect(() => {
         fetchArbData();
         const interval = setInterval(fetchArbData, 30000); // 30s refresh
         return () => clearInterval(interval);
     }, []);
+
+    useEffect(() => {
+        fetchActiveTrades();
+        const interval = setInterval(fetchActiveTrades, 10000); // 10s polling
+        return () => clearInterval(interval);
+    }, [isAuthenticated, token]);
 
     const executeArb = async (opp: ArbOpportunity) => {
         if (!isAuthenticated) {
@@ -73,7 +95,9 @@ export default function ArbScanner() {
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            alert(`Execution triggered for ${opp.symbol}! Check Active Trades.`);
+
+            // Refresh Active Trades immediately
+            fetchActiveTrades();
         } catch (e: any) {
             if (e.response?.data?.error?.includes("Missing keys")) {
                 if (confirm("Setup API Keys first! Go to Settings?")) {
@@ -90,6 +114,25 @@ export default function ArbScanner() {
     return (
         <div className="flex flex-col h-full space-y-4">
             {/* Header / Stats */}
+            {binanceStatus && (
+                <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl flex items-center gap-3 text-red-400 mb-2">
+                    <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                    <div className="text-sm">
+                        <span className="font-bold block">Data Feed Error</span>
+                        {binanceStatus}. {binanceStatus.includes("403") && "This is likely due to Binance blocking the server region (e.g. US)."}
+                    </div>
+                </div>
+            )}
+            {hlStatus && hlStatus !== 'ok' && (
+                <div className="bg-orange-500/10 border border-orange-500/30 p-4 rounded-xl flex items-center gap-3 text-orange-400 mb-2">
+                    <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                    <div className="text-sm">
+                        <span className="font-bold block">Hyperliquid Data Error</span>
+                        Could not fetch market data from Hyperliquid.
+                    </div>
+                </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-gray-900/50 border border-gray-800 p-4 rounded-xl backdrop-blur-sm">
                     <div className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-1">Top APR</div>
@@ -118,6 +161,68 @@ export default function ArbScanner() {
                     </button>
                 </div>
             </div>
+
+            {/* Active Trades Section (New) */}
+            {
+                activeTrades.length > 0 && (
+                    <div className="bg-gray-900/40 border border-gray-800 rounded-2xl overflow-hidden backdrop-blur-sm">
+                        <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-blue-900/10">
+                            <h3 className="font-bold flex items-center gap-2 text-blue-300">
+                                <Zap className="w-5 h-5" />
+                                Active Arbitrage Positions
+                            </h3>
+                        </div>
+                        <div className="overflow-auto max-h-48 scanner-scrollbar">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="bg-gray-900/80 sticky top-0 text-xs uppercase text-gray-500 font-bold">
+                                    <tr>
+                                        <th className="p-3">Time</th>
+                                        <th className="p-3">Symbol</th>
+                                        <th className="p-3">Direction</th>
+                                        <th className="p-3 text-right">Size (USD)</th>
+                                        <th className="p-3 text-right">Entry (HL/Bin)</th>
+                                        <th className="p-3 text-right">Current (HL/Bin)</th>
+                                        <th className="p-3 text-right">PnL</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-800/50 text-xs">
+                                    {activeTrades.map(trade => (
+                                        <tr key={trade.id} className="hover:bg-gray-800/30">
+                                            <td className="p-3 text-gray-400">{new Date(trade.entry_time).toLocaleTimeString()}</td>
+                                            <td className="p-3 font-bold text-white">{trade.symbol}</td>
+                                            <td className="p-3">
+                                                <span className={`px-2 py-0.5 rounded border ${trade.direction.includes('Short HL')
+                                                    ? 'bg-red-500/10 border-red-500/30 text-red-300'
+                                                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                                    }`}>
+                                                    {trade.direction}
+                                                </span>
+                                            </td>
+                                            <td className="p-3 text-right font-mono">${trade.size_usd}</td>
+                                            <td className="p-3 text-right font-mono text-gray-400">
+                                                <div>{trade.entry_price_hl ? trade.entry_price_hl.toFixed(4) : 'MOCK'}</div>
+                                                <div className="text-[10px] text-gray-600">{trade.entry_price_bin ? trade.entry_price_bin.toFixed(4) : 'MOCK'}</div>
+                                            </td>
+                                            <td className="p-3 text-right font-mono text-gray-300">
+                                                <div>{trade.current_price_hl ? trade.current_price_hl.toFixed(4) : '--'}</div>
+                                                <div className="text-[10px] text-gray-500">{trade.current_price_bin ? trade.current_price_bin.toFixed(4) : '--'}</div>
+                                            </td>
+                                            <td className={`p-3 text-right font-mono font-bold ${(trade.pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                {trade.pnl !== undefined ? (
+                                                    <>
+                                                        <div>{trade.pnl > 0 ? '+' : ''}{trade.pnl} USD</div>
+                                                        <div className="text-[10px] opacity-70">{trade.pnl_percent > 0 ? '+' : ''}{trade.pnl_percent}%</div>
+                                                    </>
+                                                ) : '--'}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )
+            }
 
             {/* Main Table */}
             <div className="flex-1 bg-gray-900/40 border border-gray-800 rounded-2xl overflow-hidden backdrop-blur-sm flex flex-col">
@@ -204,6 +309,6 @@ export default function ArbScanner() {
                     </table>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }
