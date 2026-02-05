@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Alpha Terminal: Institutional-Grade Trading Intelligence
 
-## Getting Started
+Alpha Terminal is a high-performance trading interface designed for the Hyperliquid ecosystem. It combines real-time data streaming, AI-driven market analysis, and low-latency execution tools to provide traders with institutional-grade intelligence.
 
-First, run the development server:
+## 🚀 Key Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Intelligence Aggregator**: Real-time news feed from global sources with sentiment analysis and confidence scoring.
+- **AI Intelligence Hub**: Powered by Gemini 2.0 Flash, providing structured market analysis, directional bias, and conviction levels.
+- **Insider Intelligence**: Real-time monitoring of Hyperliquid WebSocket streams for whale trades ($1M+), massive liquidations, and liquidity walls.
+- **1-Click Terminal**: Authorized agent-based trading for low-latency, one-click execution without per-trade wallet confirmations.
+- **Predictive Risk Hub**: Intelligent position sizing and automated safety guards (Take-Profit/Stop-Loss) based on account risk profile.
+- **Smart 1% Risk**: Automated position sizing to ensure no more than 1% of equity is at risk on a single trade.
+
+## 🛠 Tech Stack
+
+- **Frontend**: Next.js 14, React, Framer Motion, Tailwind CSS.
+- **Icons/UI**: Lucide React, Glassmorphism aesthetics.
+- **Data**: Hyperliquid WebSocket API, CryptoCompare Aggregated News API.
+- **Intelligence**: Gemini 2.0 Flash for market analysis.
+- **Authentication**: Wagmi, RainbowKit.
+
+## ⚡️ Quick Start
+
+### 1. Environment Configuration
+Create a `.env.local` file in the `web` directory:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=your_id
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Development Mode
+```bash
+npm install
+npm run dev
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Production Build
+```bash
+npm run build
+npm start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🧠 Intelligence Components
 
-## Learn More
+### News Hub (`NewsFeed.tsx`)
+Aggregates news and assigns confidence scores. High-conviction news (>=85%) can be set to "Auto-Pilot" for automated execution when the 1-Click Terminal is active.
 
-To learn more about Next.js, take a look at the following resources:
+### AI Node (`AIAnalysis.tsx`)
+Fetches deep analysis from the backend engine. Provides directional bias (Long/Short/Neutral/Close) and reasoning based on technical indicators like RSI, MACD, and Trend analysis.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Insider Feed (`InsiderIntelligence.tsx`)
+Monitors the order flow for institutional "Whale" moves ($1M+) and massive liquidations. Provides visual alerts within the terminal for immediate awareness of market-moving events.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🛡 Risk Management
 
-## Deploy on Vercel
+The terminal emphasizes capital preservation:
+- **Safety Guards**: Interactive TP/SL setting with AI-suggested levels.
+- **Risk Advisory**: Visual warnings when position exposure or leverage exceeds safety thresholds.
+- **Smart Sizing**: Automated calculation of lot sizes based on stop-loss distance and account risk.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+*Built for High-Frequency Alpha.*

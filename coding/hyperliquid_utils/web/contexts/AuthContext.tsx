@@ -13,6 +13,7 @@ interface User {
     telegram_chat_id?: string;
     provider: string;
     created_at: string;
+    wallets?: { address: string }[];
 }
 
 interface AuthContextType {

@@ -73,9 +73,16 @@ async def get_current_user(
     user_id = payload.get("sub")
     if not user_id:
         return None
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    return user
+        
+    try:
+        # Cast string to UUID object for SQLAlchemy
+        import uuid
+        user_uuid = uuid.UUID(user_id)
+        user = db.query(User).filter(User.id == user_uuid).first()
+        return user
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid UUID in token: {user_id}")
+        return None
 
 
 async def require_user(

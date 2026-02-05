@@ -11,23 +11,58 @@ from database import get_db_session
 
 logger = logging.getLogger("TwapDetector")
 
-# Asset ID to Symbol mapping (from Hyperliquid)
+# Dynamic Asset ID to Symbol mapping (populated from Hyperliquid API)
 # Perps use index 0-255, Spot uses 10000+, etc.
-ASSET_ID_MAP = {
-    0: "BTC", 1: "ETH", 2: "ATOM", 3: "MATIC", 4: "DYDX", 5: "SOL", 
-    6: "AVAX", 7: "BNB", 8: "APE", 9: "OP", 10: "LTC", 11: "ARB",
-    14: "DOGE", 16: "LINK", 25: "TRX", 26: "AAVE",
-    70: "WIF", 159: "HYPE", 172: "PENGU", 177: "VIRTUAL", 
-    187: "ANIME", 200: "TRUMP", 203: "MELANIA", 204: "FARTCOIN",
-    206: "AI16Z", 207: "GRIFFAIN", 214: "ZEREBRO", 218: "VINE", 223: "PLUME", 224: "SONIC",
-    # Spot tokens (11xxxx = Spot)
-    110000: "@BTC", 110001: "@ETH", 110002: "@SOL", 110003: "@HYPE",
-    110004: "@stHYPE", 110006: "@USDC", 110010: "@PURR", 110011: "@JEFF",
-    110016: "@CATBAL", 110026: "@HFUN", 110030: "@STIX", 110035: "@PIP", 110038: "@BUDDY",
-    # Add more as needed
-    10107: "HYPE/USDC", 10142: "SPEC", 10188: "LIQD", 10254: "AGENT", 10260: "SOLV",
-    120005: "@BNRY", 120011: "@FRIED", 150004: "@USDT",
-}
+ASSET_ID_MAP = {}  # Will be populated dynamically
+
+async def fetch_asset_mapping() -> Dict[int, str]:
+    """Fetch the current asset ID to symbol mapping from Hyperliquid."""
+    mapping = {}
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Fetch perp universe
+            async with session.post(
+                "https://api.hyperliquid.xyz/info",
+                json={"type": "meta"},
+                headers={"Content-Type": "application/json"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    universe = data.get("universe", [])
+                    for i, token in enumerate(universe):
+                        name = token.get("name", f"PERP_{i}")
+                        mapping[i] = name
+                    logger.info(f"📊 Loaded {len(universe)} perp asset mappings")
+            
+            # Fetch spot universe  
+            async with session.post(
+                "https://api.hyperliquid.xyz/info",
+                json={"type": "spotMeta"},
+                headers={"Content-Type": "application/json"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    tokens = data.get("tokens", [])
+                    for token in tokens:
+                        idx = token.get("index", 0)
+                        name = token.get("name", f"SPOT_{idx}")
+                        # Spot tokens are at 10000 + index typically
+                        mapping[10000 + idx] = f"@{name}"
+                        # Some spots have different ID schemes (110xxx etc)
+                        if idx < 1000:
+                            mapping[110000 + idx] = f"@{name}"
+                    logger.info(f"📊 Loaded {len(tokens)} spot asset mappings")
+                    
+    except Exception as e:
+        logger.error(f"Failed to fetch asset mapping: {e}")
+        # Fallback to some common ones
+        mapping = {
+            0: "BTC", 1: "ETH", 2: "ATOM", 3: "MATIC", 4: "DYDX", 5: "SOL", 
+            6: "AVAX", 7: "BNB", 8: "APE", 9: "OP", 10: "LTC", 11: "ARB",
+            12: "DOGE", 13: "INJ", 14: "SUI", 18: "LINK", 25: "XRP",
+            110000: "@BTC", 110001: "@ETH", 110002: "@SOL", 110003: "@HYPE",
+        }
+    return mapping
 
 def get_token_symbol(asset_id: int) -> str:
     """Convert asset ID to human-readable symbol."""
@@ -67,8 +102,12 @@ class TwapDetector:
 
     async def start(self):
         """Main loop: Poll HypurrScan API for active TWAPs."""
+        global ASSET_ID_MAP
         self.is_running = True
-        logger.info("📡 TWAP Detector Started (HypurrScan API Mode)")
+        
+        # Fetch asset mapping on startup
+        ASSET_ID_MAP = await fetch_asset_mapping()
+        logger.info(f"📡 TWAP Detector Started (HypurrScan API Mode) - {len(ASSET_ID_MAP)} assets mapped")
         
         while self.is_running:
             try:
@@ -317,15 +356,79 @@ class TwapDetector:
         self.is_running = False
         logger.info("TWAP Detector stopped")
 
-    # ===== Compatibility Methods (for existing API routes) =====
-    
     async def scan_once(self, tokens: List[str] = None) -> Dict[str, List[Dict]]:
         """Run a single scan (for API endpoint compatibility)."""
+        global ASSET_ID_MAP
+        
+        # Ensure asset mapping is loaded
+        if not ASSET_ID_MAP:
+            ASSET_ID_MAP = await fetch_asset_mapping()
+            
         all_twaps = await self._fetch_all_twaps()
         if all_twaps:
             active = [t for t in all_twaps if not t.get("ended")]
             await self._process_twaps(active)
         return self.active_twaps
+    
+    def add_token(self, token: str):
+        """Add a token to watched list."""
+        self.watched_tokens.add(token.upper())
+        logger.info(f"Added {token.upper()} to TWAP watch list")
+    
+    def get_active_users(self, token: str) -> Dict[str, List[Dict]]:
+        """Get active TWAP users for a specific token, organized by side."""
+        token_upper = token.upper()
+        base_token = token_upper.replace("@", "").split("/")[0]
+        
+        buyers = []
+        sellers = []
+        
+        # Check all tokens that match (handle HYPE, @HYPE, HYPE/USDC etc)
+        for stored_token, twaps in self.active_twaps.items():
+            stored_base = stored_token.replace("@", "").split("/")[0].upper()
+            if stored_base == base_token or stored_token.upper() == token_upper:
+                for twap in twaps:
+                    entry = {
+                        "address": twap.get("user", ""),
+                        "size": twap.get("size_usd", 0),
+                        "duration": twap.get("duration_mins", 0),
+                        "hash": twap.get("hash", ""),
+                        "started": twap.get("time", 0),
+                    }
+                    if twap.get("is_buy", True):
+                        buyers.append(entry)
+                    else:
+                        sellers.append(entry)
+        
+        # Sort by size descending
+        buyers.sort(key=lambda x: x["size"], reverse=True)
+        sellers.sort(key=lambda x: x["size"], reverse=True)
+        
+        return {"buyers": buyers, "sellers": sellers}
+    
+    def get_all_tokens_summary(self) -> List[Dict]:
+        """Get summary of all tokens with active TWAPs."""
+        summaries = []
+        
+        for token, twaps in self.active_twaps.items():
+            buy_volume = sum(t.get("size_usd", 0) for t in twaps if t.get("is_buy", True))
+            sell_volume = sum(t.get("size_usd", 0) for t in twaps if not t.get("is_buy", True))
+            
+            summaries.append({
+                "token": token,
+                "buy_volume": buy_volume,
+                "sell_volume": sell_volume,
+                "net_delta": buy_volume - sell_volume,
+                "active_count": len(twaps),
+                "buyers_count": sum(1 for t in twaps if t.get("is_buy", True)),
+                "sellers_count": sum(1 for t in twaps if not t.get("is_buy", True)),
+                "sentiment": "accumulating" if buy_volume > sell_volume * 1.2 else 
+                            "distributing" if sell_volume > buy_volume * 1.2 else "neutral"
+            })
+        
+        # Sort by total volume
+        summaries.sort(key=lambda x: x["buy_volume"] + x["sell_volume"], reverse=True)
+        return summaries
 
     async def handle_user_event(self, data: Dict):
         """Stub for compatibility - not used in API mode."""

@@ -11,14 +11,18 @@ interface Position {
     roe: number;
     liquidationPrice?: number;
     side: 'LONG' | 'SHORT';
+    raw?: any;
 }
 
 interface PositionsTableProps {
     positions: Position[];
     isLoading: boolean;
+    onSelectToken?: (symbol: string) => void;
+    onClose?: (position: Position) => void;
+    onAnalyze?: (position: Position) => void;
 }
 
-export default function PositionsTable({ positions, isLoading }: PositionsTableProps) {
+export default function PositionsTable({ positions, isLoading, onSelectToken, onClose, onAnalyze }: PositionsTableProps) {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center h-48 text-gray-500 gap-2">
@@ -49,16 +53,22 @@ export default function PositionsTable({ positions, isLoading }: PositionsTableP
                         <th className="px-4 py-3 font-medium text-right">Mark Price</th>
                         <th className="px-4 py-3 font-medium text-right">Liq. Price</th>
                         <th className="px-4 py-3 font-medium text-right">PnL (ROE%)</th>
+                        <th className="px-4 py-3 font-medium text-right">Action</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
                     {positions.map((pos) => (
-                        <tr key={pos.coin} className="hover:bg-gray-800/30 transition">
-                            <td className="px-4 py-3 font-bold flex items-center gap-2">
-                                <span className={pos.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}>
-                                    {pos.side}
-                                </span>
-                                {pos.coin}
+                        <tr key={pos.coin} className="hover:bg-gray-800/30 transition group">
+                            <td className="px-4 py-3">
+                                <button
+                                    onClick={() => onSelectToken && onSelectToken(pos.coin)}
+                                    className="flex items-center gap-2 hover:bg-white/5 px-2 py-1 -ml-2 rounded-lg transition-colors group/btn"
+                                >
+                                    <span className={`font-black tracking-tighter ${pos.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {pos.side}
+                                    </span>
+                                    <span className="font-bold text-white group-hover/btn:underline">{pos.coin}</span>
+                                </button>
                             </td>
                             <td className="px-4 py-3 text-right text-gray-300">
                                 {pos.size.toLocaleString()}
@@ -82,6 +92,27 @@ export default function PositionsTable({ positions, isLoading }: PositionsTableP
                                         ({pos.pnl >= 0 ? '+' : ''}{pos.roe.toFixed(2)}%)
                                     </span>
                                 </div>
+                            </td>
+                            <td className="px-4 py-3 text-right flex items-center justify-end gap-2">
+                                <button
+                                    onClick={() => onAnalyze && onAnalyze(pos)}
+                                    className="text-xs bg-purple-500/20 hover:bg-purple-500/40 text-purple-400 px-2 py-1 rounded font-bold"
+                                    title="AI Analysis"
+                                >
+                                    AI
+                                </button>
+                                <button
+                                    className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded"
+                                    onClick={() => alert("TP/SL Settings coming soon")}
+                                >
+                                    TP/SL
+                                </button>
+                                <button
+                                    onClick={() => onClose && onClose(pos)}
+                                    className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-500 px-2 py-1 rounded font-bold"
+                                >
+                                    Close
+                                </button>
                             </td>
                         </tr>
                     ))}
