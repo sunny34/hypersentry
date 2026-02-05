@@ -38,8 +38,7 @@ export const useHyperliquidSession = () => {
     const checkAgentStatus = async (user: string, agentAddr: string) => {
         try {
             const res = await axios.post(`${HYPERLIQUID_API_URL}/info`, {
-                type: "approvedBuilderFee", // Minimal request to check generic connectivity or specifically user state
-                user: user
+                type: "meta"
             });
             // Ideally we check specific agent registry, but HL doesn't expose a direct "is agent X active" easily without deep info
             // For now we assume if it exists locally, we try to use it.
@@ -49,6 +48,9 @@ export const useHyperliquidSession = () => {
         }
     };
 
+    /**
+     * Create a new Agent Wallet and Authorize it on Hyperliquid
+     */
     /**
      * Create a new Agent Wallet and Authorize it on Hyperliquid
      */
@@ -64,66 +66,79 @@ export const useHyperliquidSession = () => {
             const agentAddress = randomWallet.address;
             const privateKey = randomWallet.privateKey;
 
-            console.log("Generated Agent:", agentAddress);
+            console.log("Generating Agent Authorization for:", agentAddress);
 
-            // 2. Construct Authorization Payload
-            // Hyperliquid "Approve Agent" action
-            const timestamp = Date.now();
-            const connectionId = ethers.getBytes(randomWallet.address); // The agent address is the connectionId
+            // 2. Define Hyperliquid EIP-712 Domain and Types for "Approve Agent"
+            const domain = {
+                name: "Exchange",
+                version: "1",
+                chainId: 42161, // Hyperliquid Mainnet (Arbitrum Domain)
+                verifyingContract: "0x0000000000000000000000000000000000000000"
+            } as const;
 
+            const types = {
+                Agent: [
+                    { name: "source", type: "string" },
+                    { name: "connectionId", type: "bytes32" },
+                ],
+                ApproveAgent: [
+                    { name: "agent", type: "Agent" },
+                    { name: "nonce", type: "uint64" },
+                ],
+            } as const;
+
+            const nonce = Date.now();
+
+            // connectionId for ApproveAgent is the agent address zero-padded
+            const connectionId = ethers.zeroPadValue(agentAddress, 32) as `0x${string}`;
+
+            const message = {
+                agent: {
+                    source: "https://hyperliquid.xyz",
+                    connectionId: connectionId,
+                },
+                nonce: BigInt(nonce),
+            };
+
+            // 3. Request Signature from User's Main Wallet
+            const signature = await walletClient.signTypedData({
+                account: userAddress as `0x${string}`,
+                domain,
+                types,
+                primaryType: 'ApproveAgent',
+                message,
+            });
+
+            console.log("Agent Approved with signature:", signature);
+
+            // 4. Register Agent with Hyperliquid API
+            const sig = ethers.Signature.from(signature);
             const action = {
                 type: "approveAgent",
                 agent: {
                     source: "https://hyperliquid.xyz",
                     connectionId: connectionId,
                 },
-                nonce: timestamp
+                nonce: nonce,
             };
 
-            // Note: HL uses a specific EIP-712 domain and type structure
-            // constructing the correct signature payload requires adhering to their SDK
-            // We'll perform a simplified "User Signed Action" flow here.
-
-            // Actually, the easiest way for "Approve Agent" is to sign the specific message structure
-            // expected by the exchange.
-
-            // Payload for "Approve Agent":
-            // {
-            //    "action": { "type": "approveAgent", "agent": { ... }, "nonce": ... },
-            //    "nonce": ...,
-            //    "signature": { "r": "...", "s": "...", "v": ... }
-            // }
-
-            // Because precise EIP-712 typing is complex, we will simulate the flow or 
-            // use a simpler approach if available. For production, use the `hyperliquid` SDK via a backend proxy 
-            // OR perform client-side EIP-712 construction.
-
-            // FOR NOW: We will prompt the user and SAVE the logic locally, 
-            // but the actual on-chain authorization might need the official SDK.
-            // We will fallback to "saving locally" and assume the user has authorized it via the main HL site 
-            // OR we proceed to implement the TypedData signature:
-
-            const domain = {
-                name: "Exchange",
-                version: "1",
-                chainId: 42161, // Arbitrum One
-                verifyingContract: "0x0000000000000000000000000000000000000000" // HL Exchange
+            const registrationPayload = {
+                action,
+                nonce,
+                signature: {
+                    r: sig.r,
+                    s: sig.s,
+                    v: sig.v
+                }
             };
 
-            const types = {
-                Agent: [
-                    { name: "source", type: "string" },
-                    { name: "connectionId", type: "bytes32" },
-                ]
-            };
+            const response = await axios.post(`${HYPERLIQUID_API_URL}/exchange`, registrationPayload);
 
-            // To simplify: We just save the generated wallet and use it. 
-            // The USER must approve it. The robust way is to prompt signature now.
+            if (response.data.status !== 'ok') {
+                throw new Error(response.data.response?.error || response.data.response || "Failed to register agent on Hyperliquid");
+            }
 
-            // Since implementing full EIP-712 without the SDK types is error-prone manually:
-            // We will instruct the user to "Authorize this Agent" or we assume this is a DEV flow.
-
-            // MVP: Just save locally.
+            // 5. Save locally only after successful API registration
             const newAgent = {
                 address: agentAddress,
                 privateKey: privateKey,
@@ -134,12 +149,10 @@ export const useHyperliquidSession = () => {
             localStorage.setItem(`hl_agent_${userAddress}`, JSON.stringify(newAgent));
             setIsAgentActive(true);
 
-            // IN REALITY: You would now perform:
-            // await walletClient.signTypedData(...)
-            // axios.post('/exchange', { action... signature })
+            return newAgent;
 
-        } catch (e) {
-            console.error("Failed to enable session", e);
+        } catch (e: any) {
+            console.error("Failed to enable session:", e);
             throw e;
         } finally {
             setIsLoading(false);

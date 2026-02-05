@@ -111,47 +111,96 @@ export default function OrderForm({
 
         try {
             const finalOrderType = overrideParams?.orderType || (proType !== 'none' ? proType : orderType);
-            const orderPayload = {
-                token: symbol,
-                side: overrideParams?.side || side,
-                size: parseFloat(finalSize.toString()),
-                price: overrideParams?.price || (parseFloat(price) || null),
-                order_type: finalOrderType.replace('_', ''),
-                leverage,
-                margin_mode: marginMode,
-                reduce_only: reduceOnly,
-                tp_sl: tpSlEnabled ? { tp: parseFloat(takeProfit), sl: parseFloat(stopLoss) } : null
-            };
-
+            const isBuy = (overrideParams?.side || side) === 'buy';
             let config: any = { headers: {} };
             if (token) config.headers.Authorization = `Bearer ${token}`;
 
             // 1-Click Trading: Uses Agent key for low-latency signing
             if (isAgentActive && agent) {
                 const { ethers } = await import('ethers');
+                const { signAgentAction } = await import('../../utils/signing');
+
                 const wallet = new ethers.Wallet(agent.privateKey);
                 const nonce = Date.now();
-                const signature = await wallet.signMessage(JSON.stringify({ ...orderPayload, nonce }));
 
-                const signedPayload = {
-                    ...orderPayload,
-                    signature,
-                    nonce,
-                    agentAddress: agent.address
+                // Construct Hyperliquid L1 Action
+                const assetId = (window as any)._assetMap?.[symbol] ?? 0;
+
+                const orders: any[] = [
+                    {
+                        a: assetId,
+                        b: isBuy,
+                        p: (parseFloat(price) || currentPrice).toString(),
+                        s: parseFloat(finalSize.toString()).toString(),
+                        r: reduceOnly,
+                        t: finalOrderType === 'market'
+                            ? { limit: { tif: 'Ioc' } }
+                            : { limit: { tif: 'Gtc' } }
+                    }
+                ];
+
+                // Bundle Safety Guards (TP/SL) if enabled
+                if (tpSlEnabled) {
+                    if (takeProfit) {
+                        orders.push({
+                            a: assetId,
+                            b: !isBuy,
+                            p: takeProfit.toString(),
+                            s: parseFloat(finalSize.toString()).toString(),
+                            r: true,
+                            t: { trigger: { isMarket: true, triggerPx: takeProfit.toString(), tpsl: 'tp' } }
+                        });
+                    }
+                    if (stopLoss) {
+                        orders.push({
+                            a: assetId,
+                            b: !isBuy,
+                            p: stopLoss.toString(),
+                            s: parseFloat(finalSize.toString()).toString(),
+                            r: true,
+                            t: { trigger: { isMarket: true, triggerPx: stopLoss.toString(), tpsl: 'sl' } }
+                        });
+                    }
+                }
+
+                const action = {
+                    type: "order",
+                    orders: orders,
+                    grouping: "na"
                 };
+
+                const signedPayload = await signAgentAction(wallet, action, nonce);
 
                 const res = await axios.post(`${API_URL}/trading/order`, signedPayload, config);
 
-                if (res.data.status === 'filled') {
-                    setResult({ success: true, message: `⚡ 1-Click Fill: ${orderPayload.side.toUpperCase()} ${finalSize} ${symbol}` });
+                if (res.data.status === 'ok' || res.data.status === 'filled') {
+                    setResult({
+                        success: true,
+                        message: `⚡ 1-Click: ${isBuy ? 'LONG' : 'SHORT'} ${finalSize} ${symbol}${tpSlEnabled ? ' + Guards' : ''}`
+                    });
+                } else if (res.data.status === 'err') {
+                    setResult({ success: false, message: res.data.error || res.data.message || 'Execution Error' });
                 } else {
-                    setResult({ success: res.data.success, message: res.data.message || 'Order Dispatched' });
+                    setResult({ success: true, message: 'Order Dispatched' });
                 }
 
             } else {
+                // Managed path (automated TP/SL) still uses backend
+                const orderPayload = {
+                    token: symbol,
+                    side: isBuy ? 'buy' : 'sell',
+                    size: parseFloat(finalSize.toString()),
+                    price: overrideParams?.price || (parseFloat(price) || null),
+                    order_type: finalOrderType.replace('_', ''),
+                    leverage,
+                    margin_mode: marginMode,
+                    reduce_only: reduceOnly,
+                    tp_sl: tpSlEnabled ? { tp: parseFloat(takeProfit), sl: parseFloat(stopLoss) } : null
+                };
+
                 const res = await axios.post(`${API_URL}/trading/order`, orderPayload, config);
-                if (res.data.simulated) {
-                    setResult({ success: true, message: `⚠️ Simulation: ${orderPayload.side.toUpperCase()} ${finalSize} ${symbol}` });
+                if (res.data.status === 'err') {
+                    setResult({ success: false, message: res.data.error || 'Execution Failed' });
                 } else {
                     setResult({ success: true, message: `✅ Order Placed: ${orderPayload.side.toUpperCase()} ${finalSize} ${symbol}` });
                 }
@@ -280,27 +329,24 @@ export default function OrderForm({
                 </div>
             </div>
 
-            {/* 1-Click Toggle */}
-            {isAuthenticated && (
-                <div
-                    onClick={isAgentActive ? undefined : onEnableAgent}
-                    title={isAgentActive ? "Agent active - orders sign automatically" : "Enable low-latency 1-click trading"}
-                    className={`
-                        flex items-center justify-between px-3 py-2 rounded-lg border transition-all cursor-pointer
+            <div
+                onClick={isAgentActive ? undefined : onEnableAgent}
+                title={isAgentActive ? "Agent active - orders sign automatically" : "Enable low-latency 1-click trading"}
+                className={`
+                        flex items-center justify-between px-3 py-2 rounded-lg border transition-all cursor-pointer group
                         ${isAgentActive
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
-                            : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'}
+                        ? 'bg-[#00ff9d]/5 border-[#00ff9d]/30 text-[#00ff9d] shadow-[0_0_20px_rgba(0,255,157,0.1)]'
+                        : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'}
                     `}
-                >
-                    <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${isAgentActive ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
-                        <span className="text-xs font-bold uppercase tracking-tight">1-Click Terminal</span>
-                    </div>
-                    <div className="text-[10px] uppercase font-black opacity-75">
-                        {isAgentActive ? 'Online' : 'Enable'}
-                    </div>
+            >
+                <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${isAgentActive ? 'bg-[#00ff9d] animate-pulse' : 'bg-gray-500'}`} />
+                    <span className="text-[10px] font-black uppercase tracking-wider">1-Click Terminal</span>
                 </div>
-            )}
+                <div className={`text-[10px] uppercase font-black transition-opacity ${isAgentActive ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`}>
+                    {isAgentActive ? 'Active' : 'Enable'}
+                </div>
+            </div>
 
             {/* Strategy Tabs */}
             <div className="flex border-b border-gray-800">
@@ -353,13 +399,17 @@ export default function OrderForm({
 
             {/* Wallet Integration */}
             <div className="flex justify-between items-center text-[10px] text-gray-500 px-1">
-                <span className="uppercase font-bold tracking-widest text-[8px]">Available Term</span>
+                <span className="uppercase font-black tracking-widest text-[8px] opacity-40">Available Term</span>
                 <div className="flex items-center gap-2">
-                    <span className="text-gray-300 font-mono font-bold">${(walletBalance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                    <span className="text-gray-200 font-mono font-bold">
+                        <span className="opacity-40 font-normal">$</span>
+                        {Math.floor(walletBalance || 0).toLocaleString()}
+                        <span className="opacity-30 text-[9px]">.{(walletBalance % 1).toFixed(3).substring(2)}</span>
+                    </span>
                     <button
                         type="button"
                         onClick={onDeposit}
-                        className="text-[9px] bg-blue-500/10 hover:bg-blue-500/30 text-blue-400 px-2 py-0.5 rounded transition uppercase font-black tracking-tighter"
+                        className="text-[9px] bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 px-2 py-0.5 rounded transition-all uppercase font-black tracking-tighter border border-blue-500/30"
                     >
                         Deposit
                     </button>
@@ -429,7 +479,7 @@ export default function OrderForm({
                         min="0"
                         max="100"
                         step="1"
-                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                        className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-[#00ff9d] hover:accent-white transition-all"
                         onChange={(e) => {
                             const percent = parseInt(e.target.value);
                             const maxUsd = (walletBalance > 0 ? walletBalance : 1000) * leverage;
@@ -437,7 +487,7 @@ export default function OrderForm({
                             setSize(calcSize.toFixed(4));
                         }}
                     />
-                    <div className="flex justify-between text-[9px] text-gray-600 mt-1 font-mono opacity-50 group-hover:opacity-100 transition-opacity">
+                    <div className="flex justify-between text-[8px] text-white/20 mt-2 font-black uppercase tracking-tighter group-hover:text-white/40 transition-colors">
                         <span>0%</span>
                         <span>25%</span>
                         <span>50%</span>

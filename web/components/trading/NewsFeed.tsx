@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Newspaper, ExternalLink, RefreshCw, Clock, Zap, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
+import { Newspaper, ExternalLink, RefreshCw, Clock, Zap, TrendingUp, TrendingDown, AlertTriangle, Shield, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 /**
@@ -22,6 +22,8 @@ interface NewsItem {
 interface NewsFeedProps {
     /** The token symbol to fetch news for (e.g., 'BTC', 'ETH') */
     symbol: string;
+    /** Current AI Bias from Gemini analysis */
+    aiBias?: 'bullish' | 'bearish' | 'neutral';
     /** Optional callback fired when a major news item is detected */
     onMajorNews?: (news: NewsItem) => void;
 }
@@ -33,11 +35,12 @@ interface NewsFeedProps {
  * sentiment using internal heuristics, and provides actionable trading signals.
  * Supports "Auto-Pilot" mode for automated trade execution on high-conviction events.
  */
-export default function NewsFeed({ symbol, onMajorNews }: NewsFeedProps) {
+export default function NewsFeed({ symbol, aiBias = 'neutral', onMajorNews }: NewsFeedProps) {
     const [news, setNews] = useState<NewsItem[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [autoPilot, setAutoPilot] = useState(false);
+    const [guardianActive, setGuardianActive] = useState(true);
     const [globalSentiment, setGlobalSentiment] = useState<{ positive: number, negative: number, neutral: number }>({ positive: 0, negative: 0, neutral: 0 });
     const lastNewsUrlRef = useRef<string | null>(null);
 
@@ -100,17 +103,26 @@ export default function NewsFeed({ symbol, onMajorNews }: NewsFeedProps) {
 
                 // AUTO-PILOT EXECUTION
                 if (autoPilot && confidence >= 85 && sentiment !== 'neutral') {
-                    // Logic to prevent duplicate trades for same news URL
-                    if (lastNewsUrlRef.current !== newItem.url) {
-                        console.log(`🤖 [AUTO-PILOT] High Conviction Signal (${confidence}%). Executing ${sentiment.toUpperCase()} on ${newItem.title}`);
-                        window.dispatchEvent(new CustomEvent('smart-trade-execute', {
-                            detail: {
-                                symbol: symbol,
-                                side: sentiment === 'positive' ? 'buy' : 'sell',
-                                size: 'AUTO',
-                                reason: `AUTO-PILOT (${confidence}%): ${item.title}`
-                            }
-                        }));
+                    // Guardian Check: Ensure News Sentiment matches the current AI Bias
+                    const isConfirmedByGuardian = !guardianActive ||
+                        (sentiment === 'positive' && aiBias === 'bullish') ||
+                        (sentiment === 'negative' && aiBias === 'bearish');
+
+                    if (isConfirmedByGuardian) {
+                        // Logic to prevent duplicate trades for same news URL
+                        if (lastNewsUrlRef.current !== newItem.url) {
+                            console.log(`🤖 [AUTO-PILOT] Confirmed by Guardian. Executing ${sentiment.toUpperCase()} on ${newItem.title}`);
+                            window.dispatchEvent(new CustomEvent('smart-trade-execute', {
+                                detail: {
+                                    symbol: symbol,
+                                    side: sentiment === 'positive' ? 'buy' : 'sell',
+                                    size: 'AUTO',
+                                    reason: `AUTO-PILOT (${confidence}%): ${item.title}`
+                                }
+                            }));
+                        }
+                    } else {
+                        console.warn(`🛡️ [GUARDIAN] Blocked potential ${sentiment.toUpperCase()} trade on ${symbol}. Logic mismatch: News ${sentiment} vs AI ${aiBias}`);
                     }
                 }
 
@@ -181,6 +193,16 @@ export default function NewsFeed({ symbol, onMajorNews }: NewsFeedProps) {
                 </div>
 
                 <div className="flex items-center gap-3">
+                    {/* Guardian Selector */}
+                    <button
+                        onClick={() => setGuardianActive(!guardianActive)}
+                        title={guardianActive ? "AI Guardian Active: Verifying trades with Gemini" : "Guardian Disabled: Executing all news signals"}
+                        className={`p-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${guardianActive ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-gray-800/50 border-white/5 text-gray-500 hover:text-white'}`}
+                    >
+                        {guardianActive ? <ShieldCheck className="w-3.5 h-3.5" /> : <Shield className="w-3.5 h-3.5" />}
+                        <span className="text-[7.5px] font-black uppercase tracking-tighter hidden sm:block">Guardian</span>
+                    </button>
+
                     <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-lg border border-white/10">
                         <span className={`text-[7px] font-black uppercase tracking-tighter transition-colors ${autoPilot ? 'text-purple-400' : 'text-gray-500'}`}>Auto-Pilot</span>
                         <button

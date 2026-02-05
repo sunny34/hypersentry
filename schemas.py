@@ -47,3 +47,7 @@ class OrderRequest(BaseModel):
     size: float
     price: Optional[float] = None
     order_type: str = "market"  # "market" or "limit"
+    leverage: Optional[int] = 1
+    margin_mode: Optional[str] = "cross"
+    reduce_only: Optional[bool] = False
+    tp_sl: Optional[dict] = None

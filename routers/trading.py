@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Response, Request, HTTPException
+from fastapi.responses import JSONResponse
+import aiohttp
 from sqlalchemy.orm import Session
 from models import User, ActiveTrade
 from database import get_db
@@ -14,116 +16,133 @@ logger = logging.getLogger()
 router = APIRouter(prefix="/trading", tags=["Trading"])
 manager = TraderManager() # Singleton
 
+# Simple TTL Cache for "lightning speed"
+_tokens_cache = {"data": None, "timestamp": 0}
+TOKEN_CACHE_TTL = 1.0 # 1 second
+
 @router.get("/tokens")
-async def get_trading_tokens():
+async def get_trading_tokens(request: Request):
     """
     Fetch all available trading tokens (Perps & Spot) from Hyperliquid.
-    
-    Includes 24h volume, price change, and current funding rates.
-    Filters out inactive markets to ensure terminal liquidity.
-    
-    Returns:
-        dict: List of token metadata objects.
+    Optimized with shared session and TTL caching for lightning speed.
     """
-    import aiohttp
+    global _tokens_cache
     
+    # Return cached data if valid
+    if _tokens_cache["data"] and (time.time() - _tokens_cache["timestamp"] < TOKEN_CACHE_TTL):
+        return _tokens_cache["data"]
+        
     tokens = []
+    session = getattr(request.app.state, "session", None)
     
     try:
-        async with aiohttp.ClientSession(trust_env=True) as session:
-            # Fetch perp metadata and context (prices, 24h stats)
+        # Fetch perp metadata and context (prices, 24h stats)
+        # We reuse the global session for high performance
+        if session:
             async with session.post(
                 "https://api.hyperliquid.xyz/info",
-                json={"type": "metaAndAssetCtxs"},
-                timeout=aiohttp.ClientTimeout(total=10)
+                json={"type": "metaAndAssetCtxs"}
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    # data[0] is meta, data[1] is assetCtxs
-                    meta = data[0]
-                    asset_ctxs = data[1]
-                    
-                    for i, asset in enumerate(meta.get("universe", [])):
-                        ctx = asset_ctxs[i] if i < len(asset_ctxs) else {}
-                        current_price = float(ctx.get("markPx", 0))
-                        prev_day_px = float(ctx.get("prevDayPx", 0))
-                        
-                        change_24h = 0
-                        if prev_day_px > 0:
-                            change_24h = ((current_price - prev_day_px) / prev_day_px) * 100
-                        
-                        # Filter out inactive/zombie markets
-                        volume = float(ctx.get("dayNtlVlm", 0))
-                        oi = float(ctx.get("openInterest", 0))
-                        
-                        if oi <= 0 or volume <= 0:
-                            continue
+                else:
+                    raise Exception(f"HL API Error: {resp.status}")
+        else:
+            # Fallback if session is missing
+            async with aiohttp.ClientSession() as fallback_session:
+                async with fallback_session.post(
+                    "https://api.hyperliquid.xyz/info",
+                    json={"type": "metaAndAssetCtxs"}
+                ) as resp:
+                    data = await resp.json()
+        
+        # data[0] is meta, data[1] is assetCtxs
+        meta = data[0]
+        asset_ctxs = data[1]
+        
+        for i, asset in enumerate(meta.get("universe", [])):
+            ctx = asset_ctxs[i] if i < len(asset_ctxs) else {}
+            current_price = float(ctx.get("markPx", 0))
+            prev_day_px = float(ctx.get("prevDayPx", 0))
+            
+            change_24h = 0
+            if prev_day_px > 0:
+                change_24h = ((current_price - prev_day_px) / prev_day_px) * 100
+            
+            volume = float(ctx.get("dayNtlVlm", 0))
+            oi = float(ctx.get("openInterest", 0))
+            
+            if oi <= 0 or volume <= 0:
+                continue
 
-                        tokens.append({
-                            "symbol": asset["name"],
-                            "pair": f"{asset['name']}/USDC",
-                            "name": asset["name"],
-                            "type": "perp",
-                            "price": current_price,
-                            "prevPrice": prev_day_px,
-                            "change24h": change_24h,
-                            "volume24h": volume,
-                            "openInterest": oi,
-                            "funding": float(ctx.get("funding", 0)),
-                            "maxLeverage": asset.get("maxLeverage", 50)
-                        })
+            tokens.append({
+                "symbol": asset["name"],
+                "pair": f"{asset['name']}/USDC",
+                "name": asset["name"],
+                "type": "perp",
+                "price": current_price,
+                "prevPrice": prev_day_px,
+                "change24h": change_24h,
+                "volume24h": volume,
+                "openInterest": oi,
+                "funding": float(ctx.get("funding", 0)),
+                "maxLeverage": asset.get("maxLeverage", 50),
+                "index": i
+            })
+            
+        result = {"tokens": tokens}
+        _tokens_cache = {"data": result, "timestamp": time.time()}
+        return result
             
     except Exception as e:
         logger.error(f"Failed to fetch tokens: {e}")
         # Return fallback if API fails
-        tokens = [
+        return {"tokens": [
              {"symbol": "BTC", "pair": "BTC/USDC", "name": "Bitcoin", "type": "perp", "price": 0, "change24h": 0},
              {"symbol": "ETH", "pair": "ETH/USDC", "name": "Ethereum", "type": "perp", "price": 0, "change24h": 0}
-        ]
-    
-    return {"tokens": tokens}
+        ]}
 
 
-async def fetch_binance_funding_rates():
-    """Fetch current funding rates from Binance Futures."""
-    import aiohttp
+async def fetch_binance_funding_rates(request: Request):
+    """Fetch current funding rates from Binance Futures using shared session."""
     url = "https://fapi.binance.com/fapi/v1/premiumIndex"
+    session = getattr(request.app.state, "session", None)
+    
+    async def process_resp(resp):
+        if resp.status == 200:
+            data = await resp.json()
+            rates = {item['symbol'].replace('USDT', ''): float(item['lastFundingRate']) for item in data if item['symbol'].endswith('USDT')}
+            return rates, None
+        elif resp.status == 403:
+            logger.error("Binance API 403 Forbidden. Likely Region Block (US IP).")
+            return {}, "Binance Region Blocked (403)"
+        else:
+            logger.error(f"Binance API Error: {resp.status}")
+            return {}, f"Binance Error: {resp.status}"
+
     try:
-        async with aiohttp.ClientSession(trust_env=True) as session:
-            async with session.get(url, timeout=5) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    # Map symbol -> fundingRate
-                    rates = {item['symbol'].replace('USDT', ''): float(item['lastFundingRate']) for item in data if item['symbol'].endswith('USDT')}
-                    return rates, None
-                elif resp.status == 403:
-                    logger.error(f"Binance API 403 Forbidden. Likely Region Block (US IP).")
-                    return {}, "Binance Region Blocked (403)"
-                else:
-                    logger.error(f"Binance API Error: {resp.status}")
-                    return {}, f"Binance Error: {resp.status}"
+        if session:
+            async with session.get(url) as resp:
+                return await process_resp(resp)
+        else:
+            async with aiohttp.ClientSession() as fallback_session:
+                async with fallback_session.get(url) as resp:
+                    return await process_resp(resp)
     except Exception as e:
         logger.error(f"Error fetching Binance rates: {e}")
         return {}, str(e)
 
 
 @router.get("/arb")
-async def get_arb_opportunities():
+async def get_arb_opportunities(request: Request):
     """
     Scanner for Basis Arbitrage opportunities between Hyperliquid and Binance.
-    
-    Calculates Annualized Percentage Rate (APR) for both exchanges and 
-    identifies the spread. Recommended directions are provided for 
-    neutralizing delta while collecting funding premiums.
-    
-    Returns:
-        dict: Array of arb opportunities sorted by spread.
     """
     import asyncio
     
     # Run fetches in parallel
-    binance_task = fetch_binance_funding_rates()
-    hl_task = get_trading_tokens() # Re-use existing function which fetches HL meta + ctx
+    binance_task = fetch_binance_funding_rates(request)
+    hl_task = get_trading_tokens(request) 
     
     binance_result, hl_data = await asyncio.gather(binance_task, hl_task)
     
@@ -498,20 +517,13 @@ async def analyze_chart(req: AnalyzeRequest):
 @router.post("/order")
 async def place_order(
     req: dict, 
+    request: Request,
     user: User = Depends(require_user)
 ):
     """
     Intelligent Order Gateway.
-    
-    Dual-Path Execution:
-    1. Alpha Terminal Custom: Processed via a managed execution node with 
-       automated safety guards (TP/SL).
-    2. Signed Relay: Direct bit-level relay of EIP-712 signed payloads 
-       for 1-Click Terminal execution.
-    
-    Log: Captures standardized audit events for all order submissions.
     """
-    import aiohttp
+    session = getattr(request.app.state, "session", None)
     
     # Check if this is an Alpha Terminal internal payload (non-standard HL)
     if "token" in req and "side" in req:
@@ -530,7 +542,7 @@ async def place_order(
             
             if size <= 0:
                 logger.warning(f"🚫 [AUDIT] Rejected Order: Size too small | User: {user.email}")
-                return {"status": "err", "error": "Invalid size"}
+                return JSONResponse(status_code=400, content={"status": "err", "error": "Invalid size"})
                 
             # Execute via Managed Node
             res = manager.client.managed_trade(
@@ -540,32 +552,42 @@ async def place_order(
                 tp=tp,
                 sl=sl
             )
+            
+            if res.get("status") == "err":
+                logger.error(f"❌ [AUDIT] Smart Order Failed | User: {user.email} | Error: {res.get('message') or res.get('error')}")
+                return JSONResponse(status_code=400, content=res)
+                
             logger.info(f"✅ [AUDIT] Smart Order Success | User: {user.email} | Result: {res.get('status')}")
             return res
             
         except Exception as e:
             logger.error(f"❌ [AUDIT] Smart Order Execution CRITICAL FAILURE: {e}")
-            return {"status": "err", "error": str(e)}
+            return JSONResponse(status_code=500, content={"status": "err", "error": str(e)})
 
     # Standard Hyperliquid Relay (expects action, signature, nonce)
     if "action" not in req or "signature" not in req:
          logger.warning(f"🚫 [AUDIT] Malformed Relay Payload | User: {user.email}")
-         return {
+         return JSONResponse(status_code=400, content={
             "status": "error",
             "error": "Invalid payload format. Missing 'action' or 'token' field."
-        }
+        })
     
     logger.info(f"⚡ [AUDIT] Relay Execution Initiated | User: {user.email}")
 
     try:
         url = "https://api.hyperliquid.xyz/exchange"
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=req, headers={"Content-Type": "application/json"}) as resp:
+        if session:
+            async with session.post(url, json=req) as resp:
                 data = await resp.json()
                 return data
+        else:
+            async with aiohttp.ClientSession() as fallback_session:
+                async with fallback_session.post(url, json=req) as resp:
+                    data = await resp.json()
+                    return data
     except Exception as e:
         logger.error(f"Order Relay Error: {e}")
-        return {"status": "error", "error": str(e)}
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
 
 @router.post("/cancel")
 async def cancel_order(
@@ -624,19 +646,25 @@ async def get_account(user: str):
         return {"error": str(e)}
 
 @router.get("/prices")
-async def get_all_prices():
-    """Proxy for Hyperliquid allMids."""
-    import aiohttp
+async def get_all_prices(request: Request):
+    """Proxy for Hyperliquid allMids using global session."""
+    session = getattr(request.app.state, "session", None)
     try:
-        async with aiohttp.ClientSession() as session:
+        if session:
             async with session.post(
                 "https://api.hyperliquid.xyz/info",
-                json={"type": "allMids"},
-                timeout=aiohttp.ClientTimeout(total=5)
+                json={"type": "allMids"}
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
-                return {}
+        else:
+            async with aiohttp.ClientSession() as fallback_session:
+                async with fallback_session.post(
+                    "https://api.hyperliquid.xyz/info",
+                    json={"type": "allMids"}
+                ) as resp:
+                    return await resp.json()
+        return {}
     except Exception as e:
         logger.error(f"Failed to fetch prices: {e}")
         return {}

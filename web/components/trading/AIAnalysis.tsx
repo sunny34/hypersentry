@@ -10,6 +10,7 @@ interface AIAnalysisProps {
     interval?: string;
     positionContext?: any; // Position details
     onClosePosition?: (pos: any) => void;
+    onAnalysisUpdate?: (analysis: Analysis) => void;
 }
 
 /**
@@ -38,7 +39,7 @@ interface Analysis {
  * Fetches and displays institutional-grade market analysis powered by Gemini 2.0.
  * Dynamically adjusts recommendations based on current market data and user's open positions.
  */
-export default function AIAnalysis({ symbol, interval = "60", positionContext, onClosePosition }: AIAnalysisProps) {
+export default function AIAnalysis({ symbol, interval = "60", positionContext, onClosePosition, onAnalysisUpdate }: AIAnalysisProps) {
     const [analysis, setAnalysis] = useState<Analysis | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -57,6 +58,7 @@ export default function AIAnalysis({ symbol, interval = "60", positionContext, o
                 position: positionContext
             });
             setAnalysis(res.data);
+            if (onAnalysisUpdate) onAnalysisUpdate(res.data);
         } catch (e: any) {
             console.error('Terminal: AI Analysis Node failure:', e);
             setError('Intelligence Node Offline');

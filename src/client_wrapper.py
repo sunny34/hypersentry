@@ -14,19 +14,14 @@ class HyperliquidClient:
         
         # Initialize Exchange if credentials are present
         if config.HL_PRIVATE_KEY and config.HL_ACCOUNT_ADDRESS:
-            if "..." in config.HL_PRIVATE_KEY:
-                logging.warning("⚠️ Private Key is a placeholder. Initializing in SIMULATION MODE.")
-                self.wallet = None
-                self.exchange = None
-            else:
-                try:
-                    self.wallet = eth_account.Account.from_key(config.HL_PRIVATE_KEY)
-                    self.exchange = Exchange(self.wallet, constants.MAINNET_API_URL)
-                    logging.info("Hyperliquid Exchange initialized successfully.")
-                except Exception as e:
-                    logging.error(f"Failed to initialize Exchange (Check Private Key format): {e}")
+            try:
+                self.wallet = eth_account.Account.from_key(config.HL_PRIVATE_KEY)
+                self.exchange = Exchange(self.wallet, constants.MAINNET_API_URL)
+                logging.info("Hyperliquid Exchange initialized successfully.")
+            except Exception as e:
+                logging.error(f"Failed to initialize Exchange (Check Private Key format): {e}")
         else:
-            logging.warning("Private key not found. Client is in READ-ONLY mode.")
+            logging.warning("Private key not found or incomplete. Client is in READ-ONLY mode.")
 
     def get_user_state(self, address: str):
         """
@@ -113,8 +108,7 @@ class HyperliquidClient:
             dict: The API response from the exchange.
         """
         if not self.exchange:
-            logging.warning(f"⚠️ [SIMULATION] Market order {coin} {'Buy' if is_buy else 'Sell'} {sz}")
-            return {"status": "filled", "oid": 123456, "simulated": True}
+            raise Exception("Exchange not initialized. Private key missing or invalid.")
 
         try:
             logging.info(f"🚀 [TRADE] Executing Market Order: {coin} {'BUY' if is_buy else 'SELL'} {sz}")
@@ -150,8 +144,7 @@ class HyperliquidClient:
             dict: Summary of all execution steps.
         """
         if not self.exchange:
-            logging.warning(f"⚠️ [SIMULATION] Managed Trade {coin} | TP: {tp} | SL: {sl}")
-            return {"status": "ok", "simulated": True, "message": "Managed simulation successful"}
+            raise Exception("Exchange not initialized. Actions requiring signing are disabled.")
 
         results = []
         try:

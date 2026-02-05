@@ -40,6 +40,15 @@ export default function InsiderIntelligence({ coin }: { coin: string }) {
 
         setAlerts((prev: Alert[]) => [newAlert, ...prev].slice(0, 3)); // Keep only latest 3 alerts
 
+        // Dispatch Global Event for Chart Markers
+        window.dispatchEvent(new CustomEvent('intel-marker', {
+            detail: {
+                type: alert.type,
+                side: alert.side,
+                label: alert.title.split(' ')[0] // Short label
+            }
+        }));
+
         // Auto-cleanup alert after visibility duration
         setTimeout(() => {
             setAlerts((prev: Alert[]) => prev.filter((a: Alert) => a.id !== newAlert.id));
@@ -53,12 +62,12 @@ export default function InsiderIntelligence({ coin }: { coin: string }) {
             data.forEach(t => {
                 if (t.coin === coin) {
                     const usdSize = parseFloat(t.px) * parseFloat(t.sz);
-                    // Institutional Threshold: $1M+ USD
+                    // Institutional Threshold: $1M+ USD (High Conviction Only)
                     if (usdSize >= 1000000) {
                         addAlert({
                             type: 'whale',
                             title: usdSize >= 5000000 ? '🐋 KRAKEN SPOTTED 🐋' : '🚨 INSTITUTIONAL MOVE 🚨',
-                            message: `${t.side === 'B' ? 'AGGRESSIVE BUY' : 'AGGRESSIVE SELL'} of $${(usdSize / 1000000).toFixed(1)}M at $${parseFloat(t.px).toLocaleString()}`,
+                            message: `${t.side === 'B' ? 'AGGRESSIVE BUY' : 'AGGRESSIVE SELL'} of $${(usdSize / 1000000).toFixed(2)}M at $${parseFloat(t.px).toLocaleString()}`,
                             side: t.side === 'B' ? 'buy' : 'sell'
                         });
                     }
@@ -74,11 +83,11 @@ export default function InsiderIntelligence({ coin }: { coin: string }) {
                 const liq = item.liq || item;
                 if (liq && liq.coin === coin) {
                     const usdSize = parseFloat(liq.px) * parseFloat(liq.sz);
-                    if (usdSize > 10000) { // $10k+ Liquidation
+                    if (usdSize > 1000) { // $1k+ Liquidation (Ultra-sensitive)
                         const isLong = liq.side === 'S';
                         addAlert({
                             type: 'liq',
-                            title: usdSize > 100000 ? '🔥 MASSIVE REKT 🔥' : 'LIQUIDATION DETECTED',
+                            title: usdSize > 25000 ? '🔥 MASSIVE REKT 🔥' : 'LIQUIDATION DETECTED',
                             message: `${isLong ? 'Long' : 'Short'} position liquidated for $${(usdSize / 1000).toFixed(1)}k at $${parseFloat(liq.px).toFixed(2)}`,
                             side: isLong ? 'sell' : 'buy' // Long liq = forced sell
                         });
@@ -133,11 +142,9 @@ export default function InsiderIntelligence({ coin }: { coin: string }) {
                         exit={{ opacity: 0, x: 20, scale: 0.95, filter: 'blur(5px)' }}
                         className="pointer-events-auto"
                     >
-                        <div className={`relative overflow-hidden rounded-2xl border backdrop-blur-3xl transition-all shadow-2xl ${alert.type === 'whale'
-                            ? 'bg-black/60 border-blue-500/30'
-                            : alert.type === 'wall'
-                                ? 'bg-black/60 border-purple-500/30'
-                                : 'bg-black/60 border-emerald-500/30'
+                        <div className={`relative overflow-hidden rounded-2xl border-2 backdrop-blur-3xl transition-all shadow-2xl animate-pulse ${alert.side === 'buy'
+                            ? 'bg-black/80 border-emerald-500/50 shadow-emerald-500/20'
+                            : 'bg-black/80 border-red-500/50 shadow-red-500/20'
                             }`}>
                             {/* Neural Glow */}
                             <div className={`absolute -inset-1 opacity-20 blur-2xl ${alert.side === 'buy' ? 'bg-emerald-500' : 'bg-red-500'

@@ -16,7 +16,7 @@ from src.manager import TraderManager
 from src.strategies.bridge_monitor import BridgeMonitor
 
 # Import Routers
-from routers import auth, wallets, twap, bridges, settings, trading, backtest
+from routers import auth, wallets, twap, bridges, settings, trading, backtest, market
 
 # Configure Colored Logging
 handler = colorlog.StreamHandler()
@@ -50,6 +50,13 @@ async def lifespan(app: FastAPI):
     config.validate()
     manager = TraderManager() # Init singleton
     
+    # Initialize Global HTTP Session
+    import aiohttp
+    app.state.session = aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=10),
+        headers={"Content-Type": "application/json"}
+    )
+    
     # Initialize Bridge Monitor
     from src.notifications import TelegramBot
     telegram_bot = TelegramBot()
@@ -77,6 +84,8 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down manager...")
     bridge_monitor.stop()
     await manager.stop_all()
+    if hasattr(app.state, "session"):
+        await app.state.session.close()
 
 app = FastAPI(
     title="HyperliquidSentry API",
@@ -115,6 +124,7 @@ app.include_router(bridges.router)
 app.include_router(settings.router)
 app.include_router(trading.router)
 app.include_router(backtest.router)
+app.include_router(market.router)
 
 # WebSocket Endpoint
 from fastapi import WebSocket, WebSocketDisconnect

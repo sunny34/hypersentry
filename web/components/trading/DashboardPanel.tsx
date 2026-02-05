@@ -11,6 +11,7 @@ interface DashboardPanelProps {
     onClosePosition: (pos: any) => void;
     onCancelOrder: (order: any) => void;
     onAnalyze?: (pos: any) => void;
+    activeTabOverride?: 'positions' | 'orders' | 'history' | 'balances';
 }
 
 export default function DashboardPanel({
@@ -21,9 +22,12 @@ export default function DashboardPanel({
     onSelectToken,
     onClosePosition,
     onCancelOrder,
-    onAnalyze
+    onAnalyze,
+    activeTabOverride
 }: DashboardPanelProps) {
-    const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'history' | 'balances'>('positions');
+    const [localTab, setLocalTab] = useState<'positions' | 'orders' | 'history' | 'balances'>('positions');
+    const activeTab = activeTabOverride || localTab;
+    const setActiveTab = activeTabOverride ? () => { } : setLocalTab;
 
     // Transform raw HL positions to Table format
     const tablePositions = positions.map((p: any) => {
@@ -51,26 +55,28 @@ export default function DashboardPanel({
 
     return (
         <div className="flex flex-col h-full bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm">
-            {/* Tabs Header */}
-            <div className="flex items-center border-b border-gray-800/50 px-2 bg-black/20">
-                {[
-                    { id: 'positions', label: `Positions (${positions.length})` },
-                    { id: 'orders', label: `Open Orders (${openOrders.length})` },
-                    { id: 'history', label: 'Trade History' },
-                    { id: 'balances', label: 'Balances' }
-                ].map((tab) => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id as any)}
-                        className={`px-4 py-3 text-sm font-bold border-b-2 transition ${activeTab === tab.id
-                            ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5'
-                            : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'
-                            }`}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
+            {/* Tabs Header - Only show if not controlled externally */}
+            {!activeTabOverride && (
+                <div className="flex items-center border-b border-gray-800/50 px-2 bg-black/20">
+                    {[
+                        { id: 'positions', label: `Positions (${positions.length})` },
+                        { id: 'orders', label: `Open Orders (${openOrders.length})` },
+                        { id: 'history', label: 'Trade History' },
+                        { id: 'balances', label: 'Balances' }
+                    ].map((tab) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id as any)}
+                            className={`px-4 py-3 text-sm font-bold border-b-2 transition ${activeTab === tab.id
+                                ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5'
+                                : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                                }`}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {/* Content Area */}
             <div className="flex-1 overflow-auto bg-black/20">

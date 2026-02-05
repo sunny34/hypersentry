@@ -164,3 +164,74 @@ async def get_twap_summary(user: User = Depends(require_user)):
     """Get summary of all watched tokens with latest TWAP data."""
     summaries = manager.twap_detector.get_all_tokens_summary()
     return {"tokens": summaries}
+
+
+# ===== Public Endpoints (no auth required) =====
+
+@router.get("/public/{token}")
+async def get_public_twap_data(token: str):
+    """Get TWAP data for any token (no auth required).
+    
+    This endpoint is used by the TwapIntelligence widget to show
+    real-time TWAP activity for the currently selected token.
+    """
+    # Trigger a scan if no data exists
+    if not manager.twap_detector.active_twaps:
+        await manager.twap_detector.scan_once()
+    
+    users = manager.twap_detector.get_active_users(token)
+    
+    # Calculate summary
+    buy_volume = sum(b.get("size", 0) for b in users.get("buyers", []))
+    sell_volume = sum(s.get("size", 0) for s in users.get("sellers", []))
+    
+    return {
+        "token": token.upper(),
+        "buyers": users.get("buyers", []),
+        "sellers": users.get("sellers", []),
+        "summary": {
+            "buy_volume": buy_volume,
+            "sell_volume": sell_volume,
+            "net_delta": buy_volume - sell_volume,
+            "active_count": len(users.get("buyers", [])) + len(users.get("sellers", [])),
+            "sentiment": "accumulating" if buy_volume > sell_volume * 1.2 else 
+                        "distributing" if sell_volume > buy_volume * 1.2 else "neutral"
+        }
+    }
+
+
+@router.get("/all")
+async def get_all_twaps():
+    """Get all active TWAPs globally (no auth required).
+    
+    Returns all active TWAPs across all tokens for global monitoring.
+    """
+    # Trigger a scan if no data exists
+    if not manager.twap_detector.active_twaps:
+        await manager.twap_detector.scan_once()
+    
+    all_twaps = manager.twap_detector.all_active_twaps
+    summaries = manager.twap_detector.get_all_tokens_summary()
+    
+    return {
+        "twaps": all_twaps,
+        "summaries": summaries,
+        "total_count": len(all_twaps),
+        "total_buy_volume": sum(s.get("buy_volume", 0) for s in summaries),
+        "total_sell_volume": sum(s.get("sell_volume", 0) for s in summaries),
+    }
+
+
+@router.post("/scan")
+async def trigger_scan():
+    """Manually trigger a TWAP scan (no auth required).
+    
+    Forces an immediate refresh from HypurrScan API.
+    """
+    result = await manager.twap_detector.scan_once()
+    return {
+        "status": "scanned",
+        "tokens_found": list(result.keys()),
+        "total_twaps": sum(len(v) for v in result.values())
+    }
+
