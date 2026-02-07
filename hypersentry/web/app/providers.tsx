@@ -55,6 +55,24 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
     React.useEffect(() => {
         setMounted(true);
+
+        // Suppress WalletConnect origin allowlist error in development
+        // This error occurs when localhost isn't added to the WalletConnect project allowlist
+        if (process.env.NODE_ENV === 'development') {
+            const originalConsoleError = console.error;
+            console.error = (...args: unknown[]) => {
+                const message = args[0];
+                if (
+                    typeof message === 'string' &&
+                    message.includes('Origin') &&
+                    message.includes('not found on Allowlist')
+                ) {
+                    // Suppress this specific WalletConnect error in dev
+                    return;
+                }
+                originalConsoleError.apply(console, args);
+            };
+        }
     }, []);
 
     return (

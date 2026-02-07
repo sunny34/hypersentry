@@ -76,8 +76,8 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                     }
                     setLastUpdate(new Date());
                 }
-            } catch (err) {
-                console.error('TWAP fetch error:', err);
+            } catch {
+                // Silently handle - TWAP fetch failed
             } finally {
                 setLoading(false);
             }

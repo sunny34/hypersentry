@@ -25,6 +25,7 @@ export default function ArbScanner() {
     const [activeTrades, setActiveTrades] = useState<any[]>([]);
     const [binanceStatus, setBinanceStatus] = useState<string | null>(null);
     const [hlStatus, setHlStatus] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
     const fetchArbData = async () => {
         setLoading(true);
@@ -81,9 +82,11 @@ export default function ArbScanner() {
 
     const executeArb = async (opp: ArbOpportunity) => {
         if (!isAuthenticated) {
-            alert("Please login to execute trades.");
+            setError("Please login to execute trades.");
             return;
         }
+
+        setError(null);
 
         setExecuting(opp.symbol);
         try {
@@ -100,11 +103,9 @@ export default function ArbScanner() {
             fetchActiveTrades();
         } catch (e: any) {
             if (e.response?.data?.error?.includes("Missing keys")) {
-                if (confirm("Setup API Keys first! Go to Settings?")) {
-                    router.push('/settings');
-                }
+                setError("Setup API Keys first in Settings.");
             } else {
-                alert(`Failed to execute: ${e.response?.data?.error || e.message}`);
+                setError(`Failed to execute: ${e.response?.data?.error || e.message}`);
             }
         } finally {
             setExecuting(null);
@@ -113,6 +114,15 @@ export default function ArbScanner() {
 
     return (
         <div className="flex flex-col h-full space-y-4">
+            {error && (
+                <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl flex items-center justify-between text-red-400 mb-2">
+                    <div className="flex items-center gap-3">
+                        <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                        <span className="text-sm font-bold">{error}</span>
+                    </div>
+                    <button onClick={() => setError(null)} className="text-xs hover:underline uppercase font-black">Dismiss</button>
+                </div>
+            )}
             {/* Header / Stats */}
             {binanceStatus && (
                 <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl flex items-center gap-3 text-red-400 mb-2">

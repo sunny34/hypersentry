@@ -5,6 +5,7 @@ import { Activity, Wifi, WifiOff, Zap, Clock, TrendingUp, TrendingDown, Command 
 interface StatusBarProps {
     isWsConnected: boolean;
     tokens: Array<{ symbol: string; price: number; change24h: number }>;
+    isAgentActive: boolean;
     onOpenCommandPalette: () => void;
 }
 
@@ -14,7 +15,7 @@ interface StatusBarProps {
  * Inspired by Hyperdash's slim footer status bar.
  * Shows live BTC/ETH prices, connection status, and quick actions.
  */
-export default function StatusBar({ isWsConnected, tokens, onOpenCommandPalette }: StatusBarProps) {
+export default function StatusBar({ isWsConnected, tokens, isAgentActive, onOpenCommandPalette }: StatusBarProps) {
     const [time, setTime] = useState<string>('');
     const [latency, setLatency] = useState<number>(0);
 
@@ -88,6 +89,14 @@ export default function StatusBar({ isWsConnected, tokens, onOpenCommandPalette 
                 <div className="hidden sm:flex items-center gap-1.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shadow-[0_0_6px_#60a5fa]" />
                     <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider">L1 Synced</span>
+                </div>
+
+                {/* Agent Status - The 'Sticky' Indicator */}
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-white/5 border border-white/5">
+                    <Zap className={`w-3 h-3 ${isAgentActive ? 'text-emerald-400' : 'text-amber-500'}`} />
+                    <span className={`text-[9px] font-black uppercase tracking-wider ${isAgentActive ? 'text-emerald-400' : 'text-amber-500'}`}>
+                        {isAgentActive ? '1-Click Active' : '1-Click Off'}
+                    </span>
                 </div>
             </div>
 

@@ -57,8 +57,9 @@ export const useWebSocket = (url: string) => {
                 reconnectTimer.current = setTimeout(connect, 5000);
             };
 
-            socket.onerror = (err) => {
-                console.error(`⚠️ WebSocket Error: State ${socket.readyState} | URL: ${targetUrl}`);
+            socket.onerror = () => {
+                // Use warn instead of error to prevent Next.js dev overlay
+                console.warn(`⚠️ WebSocket: Connection issue (State ${socket.readyState}) - will retry`);
                 // Non-verbose error, handled by onclose
             };
 
@@ -70,8 +71,9 @@ export const useWebSocket = (url: string) => {
                     setLastMessage(event.data);
                 }
             };
-        } catch (e) {
-            console.error('❌ WebSocket Setup Fatal Error:', e);
+        } catch {
+            // Silently handle - will retry connection
+            console.warn('⚠️ WebSocket: Setup failed, will retry in 5s');
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
             reconnectTimer.current = setTimeout(connect, 5000);
         }

@@ -59,8 +59,8 @@ export default function AIAnalysis({ symbol, interval = "60", positionContext, o
             });
             setAnalysis(res.data);
             if (onAnalysisUpdate) onAnalysisUpdate(res.data);
-        } catch (e: any) {
-            console.error('Terminal: AI Analysis Node failure:', e);
+        } catch {
+            // Silently handle - set error state for UI
             setError('Intelligence Node Offline');
         } finally {
             setIsLoading(false);

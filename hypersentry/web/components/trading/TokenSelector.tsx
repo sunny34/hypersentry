@@ -24,6 +24,8 @@ export default function TokenSelector({ selectedToken, tokens, onSelect }: Token
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState('');
     const [activeTab, setActiveTab] = useState<Tab>('Crypto');
+    const [sortKey, setSortKey] = useState<'symbol' | 'price' | 'change24h' | 'volume24h'>('volume24h');
+    const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
     const containerRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -45,20 +47,20 @@ export default function TokenSelector({ selectedToken, tokens, onSelect }: Token
         }
     }, [isOpen]);
 
-    // Mock Categories logic (since we might only have crypto tokens for now)
-    // We can filter the existing tokens or mock some additional ones for UI demo if needed.
-    // For now, I'll assume 'tokens' contains mostly crypto perps. 
-    // I will generate some mock Equities/Forex for layout demonstration if they don't exist.
+    const handleSort = (key: typeof sortKey) => {
+        if (sortKey === key) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortKey(key);
+            setSortDirection('desc');
+        }
+    };
 
     const filteredTokens = useMemo(() => {
-        let list = tokens;
-
-        // If we want to demonstrate other categories, we might need to mock them if the API doesn't return them.
-        // For this task, I'll stick to filtering the passed 'tokens' or showing empty states/generic mocks for other tabs to show the UI structure.
+        let list = [...tokens];
 
         if (activeTab === 'Equities') {
-            // Mock Equities for UI demo as requested by user screenshot
-            return [
+            list = [
                 { symbol: 'US500', pair: 'US500', name: 'S&P 500', type: 'perp', price: 690.49, change24h: 0.16, volume24h: 15500000, openInterest: 8200000 },
                 { symbol: 'TSLA', pair: 'TSLA/USD', name: 'Tesla', type: 'perp', price: 428.20, change24h: 1.00, volume24h: 1100000, openInterest: 1200000 },
                 { symbol: 'AAPL', pair: 'AAPL/USD', name: 'Apple', type: 'perp', price: 259.14, change24h: 0.98, volume24h: 777000, openInterest: 477700 },
@@ -67,7 +69,7 @@ export default function TokenSelector({ selectedToken, tokens, onSelect }: Token
         }
 
         if (activeTab === 'Forex') {
-            return [
+            list = [
                 { symbol: 'EURUSD', pair: 'EUR/USD', name: 'Euro', type: 'perp', price: 1.0845, change24h: -0.05, volume24h: 90000000, openInterest: 0 },
                 { symbol: 'USDJPY', pair: 'USD/JPY', name: 'Yen', type: 'perp', price: 152.3, change24h: 0.2, volume24h: 45000000, openInterest: 0 },
             ] as Token[];
@@ -83,8 +85,23 @@ export default function TokenSelector({ selectedToken, tokens, onSelect }: Token
             );
         }
 
+        // Sorting Logic
+        list.sort((a, b) => {
+            let valA: any = a[sortKey];
+            let valB: any = b[sortKey];
+
+            if (typeof valA === 'string') {
+                valA = valA.toLowerCase();
+                valB = valB.toLowerCase();
+            }
+
+            if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+
         return list;
-    }, [tokens, activeTab, search]);
+    }, [tokens, activeTab, search, sortKey, sortDirection]);
 
     const formatCompact = (num: number) => {
         return new Intl.NumberFormat('en-US', {
@@ -93,6 +110,11 @@ export default function TokenSelector({ selectedToken, tokens, onSelect }: Token
             style: 'currency',
             currency: 'USD'
         }).format(num);
+    };
+
+    const SortIcon = ({ currentKey }: { currentKey: typeof sortKey }) => {
+        if (sortKey !== currentKey) return null;
+        return sortDirection === 'asc' ? <span className="text-blue-400 ml-1">↑</span> : <span className="text-blue-400 ml-1">↓</span>;
     };
 
     return (
@@ -136,8 +158,8 @@ export default function TokenSelector({ selectedToken, tokens, onSelect }: Token
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
                                 className={`px-3 py-1 text-xs font-bold rounded-md transition-colors whitespace-nowrap ${activeTab === tab
-                                        ? 'bg-gray-800 text-white'
-                                        : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                                    ? 'bg-gray-800 text-white'
+                                    : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
                                     }`}
                             >
                                 {tab}
@@ -147,10 +169,30 @@ export default function TokenSelector({ selectedToken, tokens, onSelect }: Token
 
                     {/* Column Headers */}
                     <div className="grid grid-cols-12 gap-2 px-4 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800/50">
-                        <div className="col-span-5 flex items-center gap-1">Asset</div>
-                        <div className="col-span-3 text-right">Price</div>
-                        <div className="col-span-2 text-right">24h</div>
-                        <div className="col-span-2 text-right">Vol</div>
+                        <div
+                            className="col-span-5 flex items-center gap-1 cursor-pointer hover:text-gray-300 transition-colors"
+                            onClick={() => handleSort('symbol')}
+                        >
+                            Asset <SortIcon currentKey="symbol" />
+                        </div>
+                        <div
+                            className="col-span-3 text-right cursor-pointer hover:text-gray-300 transition-colors"
+                            onClick={() => handleSort('price')}
+                        >
+                            Price <SortIcon currentKey="price" />
+                        </div>
+                        <div
+                            className="col-span-2 text-right cursor-pointer hover:text-gray-300 transition-colors"
+                            onClick={() => handleSort('change24h')}
+                        >
+                            24h <SortIcon currentKey="change24h" />
+                        </div>
+                        <div
+                            className="col-span-2 text-right cursor-pointer hover:text-gray-300 transition-colors"
+                            onClick={() => handleSort('volume24h')}
+                        >
+                            Vol <SortIcon currentKey="volume24h" />
+                        </div>
                     </div>
 
                     {/* Asset List */}

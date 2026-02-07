@@ -40,8 +40,8 @@ export default function TwapUsers({ token, apiUrl, authToken }: TwapUsersProps) 
                 const result = await response.json();
                 setBuyers(result.buyers || []);
                 setSellers(result.sellers || []);
-            } catch (err) {
-                console.error('Error fetching TWAP users:', err);
+            } catch {
+                // Silently handle errors - backend may be offline
             } finally {
                 setLoading(false);
             }

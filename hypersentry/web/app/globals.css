@@ -320,11 +320,13 @@ h6 {
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
     -webkit-appearance: none;
+    appearance: none;
     margin: 0;
 }
 
 input[type="number"] {
     -moz-appearance: textfield;
+    appearance: textfield;
 }
 
 /* Range Input Styling */
@@ -376,6 +378,20 @@ input[type="range"]::-webkit-slider-thumb:hover {
     }
 }
 
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+.animate-shimmer {
+    animation: shimmer 2s infinite linear;
+}
+
 /* Tooltip */
 .tooltip {
     position: relative;
@@ -400,4 +416,39 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .tooltip:hover::after {
     opacity: 1;
+}
+
+/* Professional tactical animations */
+@keyframes scanline {
+    0% {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+
+    100% {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+}
+
+.animate-scanline {
+    animation: scanline 2.5s linear infinite;
+    background: linear-gradient(to bottom, transparent, rgba(16, 185, 129, 0.2), transparent);
+}
+
+/* Elite Glow Utility */
+.glow-emerald {
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+}
+
+.glow-orange {
+    box-shadow: 0 0 15px rgba(249, 115, 22, 0.4);
+}
+
+.glow-red {
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
 }

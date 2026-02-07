@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, TrendingUp, Star, Clock, X, Command } from 'lucide-react';
+import { Search, TrendingUp, Star, Clock, X, Command, Zap } from 'lucide-react';
 
 interface Token {
     symbol: string;
@@ -9,20 +9,22 @@ interface Token {
     change24h?: number;
 }
 
+interface CommandItem {
+    id: string;
+    title: string;
+    description: string;
+    shortcut: string;
+}
+
 interface CommandPaletteProps {
     tokens: Token[];
     onSelectToken: (symbol: string) => void;
+    onExecuteCommand?: (commandId: string) => void;
     isOpen: boolean;
     onClose: () => void;
 }
 
-/**
- * CommandPalette Component
- * 
- * Inspired by Hyperdash's "Search Anything" (Cmd+K) functionality.
- * Provides instant asset switching with keyboard navigation.
- */
-export default function CommandPalette({ tokens, onSelectToken, isOpen, onClose }: CommandPaletteProps) {
+export default function CommandPalette({ tokens, onSelectToken, onExecuteCommand, isOpen, onClose }: CommandPaletteProps) {
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -44,7 +46,20 @@ export default function CommandPalette({ tokens, onSelectToken, isOpen, onClose 
         }
     }, [isOpen]);
 
-    // Filter tokens based on query
+    const COMMANDS: CommandItem[] = [
+        { id: 'des', title: 'DES', description: 'Institutional Asset Description', shortcut: '/des' },
+        { id: 'arb', title: 'ARB', description: 'Cross-Venue Arbitrage Scanner', shortcut: '/arb' },
+        { id: 'risk', title: 'RISK', description: 'Monte Carlo Portfolio Simulator', shortcut: '/risk' },
+        { id: 'debate', title: 'DEBATE', description: 'Bull vs Bear Intelligence Debate', shortcut: '/debate' },
+        { id: 'twap', title: 'TWAP', description: 'Algorithmic Execution Hub', shortcut: '/twap' },
+    ];
+
+    const isCommandMode = query.startsWith('/');
+    const filteredCommands = COMMANDS.filter(c =>
+        c.shortcut.includes(query.toLowerCase()) ||
+        c.title.toLowerCase().includes(query.slice(1).toLowerCase())
+    );
+
     const filteredTokens = tokens.filter(t =>
         t.symbol.toLowerCase().includes(query.toLowerCase()) ||
         (t.name && t.name.toLowerCase().includes(query.toLowerCase()))
@@ -56,20 +71,26 @@ export default function CommandPalette({ tokens, onSelectToken, isOpen, onClose 
         .sort((a, b) => Math.abs(b.change24h || 0) - Math.abs(a.change24h || 0))
         .slice(0, 5);
 
-    const displayList = query.length > 0 ? filteredTokens : [
+    const displayList = (isCommandMode ? filteredCommands : (query.length > 0 ? filteredTokens : [
         ...recentSearches.map(s => tokens.find(t => t.symbol === s)).filter(Boolean) as Token[],
         ...topMovers.filter(t => !recentSearches.includes(t.symbol))
-    ].slice(0, 8);
+    ].slice(0, 8))) as (Token | CommandItem)[];
 
-    const handleSelect = useCallback((symbol: string) => {
-        // Save to recent searches
-        const updated = [symbol, ...recentSearches.filter(s => s !== symbol)].slice(0, 5);
-        setRecentSearches(updated);
-        localStorage.setItem('recentAssetSearches', JSON.stringify(updated));
-
-        onSelectToken(symbol);
-        onClose();
-    }, [onSelectToken, onClose, recentSearches]);
+    const handleSelect = useCallback((item: any) => {
+        if (item.shortcut) {
+            // It's a command
+            if (onExecuteCommand) onExecuteCommand(item.id);
+            onClose();
+        } else {
+            // It's a token
+            const symbol = item.symbol;
+            const updated = [symbol, ...recentSearches.filter(s => s !== symbol)].slice(0, 5);
+            setRecentSearches(updated);
+            localStorage.setItem('recentAssetSearches', JSON.stringify(updated));
+            onSelectToken(symbol);
+            onClose();
+        }
+    }, [onSelectToken, onExecuteCommand, onClose, recentSearches]);
 
     // Keyboard navigation
     useEffect(() => {
@@ -88,7 +109,7 @@ export default function CommandPalette({ tokens, onSelectToken, isOpen, onClose 
                 case 'Enter':
                     e.preventDefault();
                     if (displayList[selectedIndex]) {
-                        handleSelect(displayList[selectedIndex].symbol);
+                        handleSelect(displayList[selectedIndex]);
                     }
                     break;
                 case 'Escape':
@@ -135,7 +156,7 @@ export default function CommandPalette({ tokens, onSelectToken, isOpen, onClose 
                             setQuery(e.target.value);
                             setSelectedIndex(0);
                         }}
-                        placeholder="Search assets..."
+                        placeholder="Search assets or type '/' for commands..."
                         className="flex-1 bg-transparent text-white text-lg font-medium placeholder:text-gray-600 focus:outline-none"
                     />
                     <div className="flex items-center gap-1.5">
@@ -152,55 +173,70 @@ export default function CommandPalette({ tokens, onSelectToken, isOpen, onClose 
                         </div>
                     )}
 
-                    {displayList.map((token, index) => (
-                        <button
-                            key={token.symbol}
-                            onClick={() => handleSelect(token.symbol)}
-                            className={`w-full flex items-center justify-between px-4 py-3 transition-colors ${index === selectedIndex
+                    {displayList.map((item, index) => {
+                        const isCmd = 'shortcut' in item;
+                        const token = !isCmd ? item as Token : null;
+                        const cmd = isCmd ? item as CommandItem : null;
+
+                        return (
+                            <button
+                                key={isCmd ? cmd?.id : token?.symbol}
+                                onClick={() => handleSelect(item)}
+                                className={`w-full flex items-center justify-between px-4 py-3 transition-colors ${index === selectedIndex
                                     ? 'bg-white/5'
                                     : 'hover:bg-white/[0.02]'
-                                }`}
-                        >
-                            <div className="flex items-center gap-3">
-                                {/* Icon based on type */}
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${token.change24h && token.change24h > 0
-                                        ? 'bg-emerald-500/10 text-emerald-400'
-                                        : 'bg-red-500/10 text-red-400'
-                                    }`}>
-                                    <span className="text-xs font-black">{token.symbol.slice(0, 2)}</span>
+                                    }`}
+                            >
+                                <div className="flex items-center gap-3">
+                                    {isCmd ? (
+                                        <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20">
+                                            <Command className="w-4 h-4" />
+                                        </div>
+                                    ) : (
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${token?.change24h && token.change24h > 0
+                                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                            : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                            }`}>
+                                            <span className="text-xs font-black">{token?.symbol.slice(0, 2)}</span>
+                                        </div>
+                                    )}
+
+                                    <div className="text-left">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-white">{isCmd ? cmd?.title : token?.symbol}</span>
+                                            {!isCmd && token?.symbol && recentSearches.includes(token.symbol) && (
+                                                <Clock className="w-3 h-3 text-gray-600" />
+                                            )}
+                                            {isCmd && (
+                                                <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1 rounded font-black uppercase tracking-tighter">CMD</span>
+                                            )}
+                                        </div>
+                                        <span className="text-xs text-gray-500">{isCmd ? cmd?.description : token?.name}</span>
+                                    </div>
                                 </div>
 
-                                <div className="text-left">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm font-bold text-white">{token.symbol}</span>
-                                        {recentSearches.includes(token.symbol) && (
-                                            <Clock className="w-3 h-3 text-gray-600" />
-                                        )}
-                                    </div>
-                                    {token.name && (
-                                        <span className="text-xs text-gray-500">{token.name}</span>
+                                <div className="text-right">
+                                    {!isCmd && token?.price && (
+                                        <div className="text-sm font-mono font-bold text-white">
+                                            ${token.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: token.price < 1 ? 6 : 2 })}
+                                        </div>
+                                    )}
+                                    {!isCmd && token?.change24h !== undefined && (
+                                        <div className={`text-xs font-mono font-bold ${token.change24h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                            {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(2)}%
+                                        </div>
+                                    )}
+                                    {isCmd && (
+                                        <span className="text-[10px] font-mono font-black text-gray-600 uppercase tracking-widest">{cmd?.shortcut}</span>
                                     )}
                                 </div>
-                            </div>
-
-                            <div className="text-right">
-                                {token.price && (
-                                    <div className="text-sm font-mono font-bold text-white">
-                                        ${token.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: token.price < 1 ? 6 : 2 })}
-                                    </div>
-                                )}
-                                {token.change24h !== undefined && (
-                                    <div className={`text-xs font-mono font-bold ${token.change24h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                        {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(2)}%
-                                    </div>
-                                )}
-                            </div>
-                        </button>
-                    ))}
+                            </button>
+                        );
+                    })}
 
                     {displayList.length === 0 && query.length > 0 && (
                         <div className="px-4 py-8 text-center">
-                            <span className="text-gray-500 text-sm">No assets found for "{query}"</span>
+                            <span className="text-gray-500 text-sm">No assets or commands found for "{query}"</span>
                         </div>
                     )}
                 </div>
@@ -217,9 +253,9 @@ export default function CommandPalette({ tokens, onSelectToken, isOpen, onClose 
                             Select
                         </span>
                     </div>
-                    <div className="flex items-center gap-1 text-[10px] text-gray-500">
-                        <Command className="w-3 h-3" />
-                        <span>+ K to toggle</span>
+                    <div className="flex items-center gap-1 text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                        <Zap className="w-3 text-blue-500" />
+                        <span>SENTRY COMMAND MODE</span>
                     </div>
                 </div>
             </div>

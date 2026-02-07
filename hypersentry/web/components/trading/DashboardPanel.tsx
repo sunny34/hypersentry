@@ -29,29 +29,39 @@ export default function DashboardPanel({
     const activeTab = activeTabOverride || localTab;
     const setActiveTab = activeTabOverride ? () => { } : setLocalTab;
 
-    // Transform raw HL positions to Table format
-    const tablePositions = positions.map((p: any) => {
-        const raw = p.position;
-        const size = parseFloat(raw.szi);
-        const entryPrice = parseFloat(raw.entryPx || 0);
+    // Transform positions to Table format with safety checks
+    const tablePositions = positions
+        .map((p: any) => {
+            // Handle both raw HL positions (which have a .position property) 
+            // and pre-transformed or fallback objects
+            const raw = p.position || p;
 
-        // Find current price in tokens array
-        const tokenData = tokens.find(t => t.symbol === raw.coin);
-        const markPrice = tokenData ? tokenData.price : 0;
+            if (!raw) return null;
 
-        return {
-            coin: raw.coin,
-            size: size,
-            value: size * (markPrice || entryPrice), // Modern value
-            entryPrice: entryPrice,
-            markPrice: markPrice,
-            pnl: parseFloat(raw.unrealizedPnl || 0),
-            roe: parseFloat(raw.returnOnEquity || 0) * 100,
-            side: (size > 0 ? 'LONG' : 'SHORT') as 'LONG' | 'SHORT',
-            liquidationPrice: parseFloat(raw.liquidationPx || 0),
-            raw: p
-        };
-    });
+            const size = parseFloat(raw.szi || raw.size || 0);
+            const entryPrice = parseFloat(raw.entryPx || raw.entryPrice || 0);
+            const coin = raw.coin || 'Unknown';
+
+            // Find current price in tokens array
+            const tokenData = tokens.find(t => t.symbol === coin);
+            const markPrice = tokenData ? tokenData.price : 0;
+            const pnl = parseFloat(raw.unrealizedPnl || 0);
+            const roe = parseFloat(raw.returnOnEquity || raw.roe || 0) * (raw.returnOnEquity ? 100 : 1);
+
+            return {
+                coin: coin,
+                size: size,
+                value: size * (markPrice || entryPrice),
+                entryPrice: entryPrice,
+                markPrice: markPrice,
+                pnl: pnl,
+                roe: roe,
+                side: (size > 0 ? 'LONG' : 'SHORT') as 'LONG' | 'SHORT',
+                liquidationPrice: parseFloat(raw.liquidationPx || raw.liquidationPrice || 0),
+                raw: p
+            };
+        })
+        .filter(p => p !== null);
 
     return (
         <div className="flex flex-col h-full bg-gray-900/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-sm">

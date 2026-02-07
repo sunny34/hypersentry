@@ -27,14 +27,22 @@ export default function BridgeAlerts({ apiUrl }: BridgeAlertsProps) {
     const [bridges, setBridges] = useState<BridgeDeposit[]>([]);
     const [stats, setStats] = useState<BridgeStats | null>(null);
     const [loading, setLoading] = useState(true);
+    const [isOffline, setIsOffline] = useState(false);
 
     useEffect(() => {
         const fetchBridges = async () => {
             try {
+                // Use AbortController for timeout handling
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+
                 const [bridgesRes, statsRes] = await Promise.all([
-                    fetch(`${apiUrl}/bridges/recent?limit=10`),
-                    fetch(`${apiUrl}/bridges/stats`)
+                    fetch(`${apiUrl}/bridges/recent?limit=10`, { signal: controller.signal }),
+                    fetch(`${apiUrl}/bridges/stats`, { signal: controller.signal })
                 ]);
+
+                clearTimeout(timeoutId);
+                setIsOffline(false);
 
                 if (bridgesRes.ok) {
                     const data = await bridgesRes.json();
@@ -45,8 +53,9 @@ export default function BridgeAlerts({ apiUrl }: BridgeAlertsProps) {
                     const data = await statsRes.json();
                     setStats(data);
                 }
-            } catch (err) {
-                console.error('Error fetching bridges:', err);
+            } catch {
+                // Silently handle network errors - backend may be offline
+                setIsOffline(true);
             } finally {
                 setLoading(false);
             }
@@ -86,6 +95,33 @@ export default function BridgeAlerts({ apiUrl }: BridgeAlertsProps) {
                 <div className="animate-pulse">
                     <div className="h-6 bg-gray-800 rounded w-48 mb-4"></div>
                     <div className="h-20 bg-gray-800 rounded"></div>
+                </div>
+            </div>
+        );
+    }
+
+    if (isOffline) {
+        return (
+            <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-gray-700/50 rounded-lg">
+                            <Warehouse className="w-5 h-5 text-gray-500" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-bold text-gray-400">Large Bridge Deposits</h3>
+                            <p className="text-gray-600 text-sm">Backend unavailable</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-gray-500" />
+                        <span className="text-gray-600 text-xs">Offline</span>
+                    </div>
+                </div>
+                <div className="text-center py-8 text-gray-600">
+                    <Warehouse className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p>Unable to connect to backend</p>
+                    <p className="text-sm text-gray-700 mt-1">Bridge monitoring will resume when connection is restored</p>
                 </div>
             </div>
         );

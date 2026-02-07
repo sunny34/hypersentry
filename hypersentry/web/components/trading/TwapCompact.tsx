@@ -41,8 +41,8 @@ export default function TwapCompact({ symbol, onExpand }: TwapCompactProps) {
                         sentiment: s.sentiment || 'neutral'
                     });
                 }
-            } catch (err) {
-                console.error('TWAP fetch error:', err);
+            } catch {
+                // Silently handle - TWAP fetch failed
             } finally {
                 setLoading(false);
             }
@@ -84,15 +84,15 @@ export default function TwapCompact({ symbol, onExpand }: TwapCompactProps) {
         <div
             onClick={onExpand}
             className={`flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-all hover:scale-[1.02] ${summary.sentiment === 'distributing'
-                    ? 'bg-red-500/10 border-red-500/30 hover:border-red-500/50'
-                    : summary.sentiment === 'accumulating'
-                        ? 'bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/50'
-                        : 'bg-white/5 border-white/10 hover:border-white/20'
+                ? 'bg-red-500/10 border-red-500/30 hover:border-red-500/50'
+                : summary.sentiment === 'accumulating'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/50'
+                    : 'bg-white/5 border-white/10 hover:border-white/20'
                 }`}
         >
             {/* Status Icon */}
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${summary.sentiment === 'distributing' ? 'bg-red-500/20' :
-                    summary.sentiment === 'accumulating' ? 'bg-emerald-500/20' : 'bg-gray-500/20'
+                summary.sentiment === 'accumulating' ? 'bg-emerald-500/20' : 'bg-gray-500/20'
                 }`}>
                 {summary.sentiment === 'distributing' ? (
                     <ArrowDown className="w-4 h-4 text-red-400" />
@@ -106,7 +106,7 @@ export default function TwapCompact({ symbol, onExpand }: TwapCompactProps) {
             {/* Sentiment Label */}
             <div className="flex-1">
                 <div className={`text-xs font-black uppercase ${summary.sentiment === 'distributing' ? 'text-red-400' :
-                        summary.sentiment === 'accumulating' ? 'text-emerald-400' : 'text-gray-400'
+                    summary.sentiment === 'accumulating' ? 'text-emerald-400' : 'text-gray-400'
                     }`}>
                     {summary.sentiment === 'distributing' ? '🐋 WHALES SELLING' :
                         summary.sentiment === 'accumulating' ? '🐋 WHALES BUYING' :

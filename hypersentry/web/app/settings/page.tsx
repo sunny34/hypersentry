@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Shield, Key, Trash2, Plus, ArrowLeft, Palette, Check } from 'lucide-react';
+import { Shield, Key, Trash2, Plus, ArrowLeft, Palette, Check, Zap, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useHyperliquidSession } from '@/hooks/useHyperliquidSession';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useRouter } from 'next/navigation';
 
@@ -15,6 +16,7 @@ export default function SettingsPage() {
 
     const { token, isAuthenticated } = useAuth();
     const { theme, setTheme } = useTheme();
+    const { isAgentActive, agent, clearSession, isLoading: sessionLoading, error: sessionError } = useHyperliquidSession();
     const router = useRouter();
 
     const themes = [
@@ -141,6 +143,69 @@ export default function SettingsPage() {
                 </div>
             ) : (
                 <>
+                    {/* Hyperliquid Agent Session Hub */}
+                    <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl p-6 backdrop-blur-sm mb-8 relative overflow-hidden">
+                        {isAgentActive && (
+                            <div className="absolute top-0 right-0 p-4">
+                                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-black uppercase tracking-tighter shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                    Active Session
+                                </span>
+                            </div>
+                        )}
+
+                        <h2 className="text-xl font-bold flex items-center gap-2 mb-2 text-white">
+                            <Zap className="text-[var(--color-primary)]" /> 1-Click Terminal Agent
+                        </h2>
+                        <p className="text-gray-500 text-xs mb-6 max-w-xl">
+                            Self-custodial agent wallet generated in your browser. This allows your terminal to trade without asking for a signature on every order.
+                            <span className="text-[var(--color-primary)]/80 ml-1 font-medium">Your master private key never leaves your wallet extension.</span>
+                        </p>
+
+                        {!isAgentActive ? (
+                            <div className="flex flex-col items-center justify-center p-8 bg-black/20 rounded-xl border border-dashed border-gray-800">
+                                <Zap className="w-10 h-10 text-gray-700 mb-3" />
+                                <p className="text-gray-400 text-sm mb-4">No active trading agent found in local storage.</p>
+                                <button
+                                    onClick={() => router.push('/')}
+                                    className="px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm font-bold transition-all"
+                                >
+                                    Enable in Terminal
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between p-4 bg-black/40 rounded-xl border border-emerald-500/20">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+                                            <Shield className="w-6 h-6 text-emerald-400" />
+                                        </div>
+                                        <div>
+                                            <div className="text-[10px] text-gray-500 font-black uppercase tracking-widest mb-0.5">Active Agent Address</div>
+                                            <div className="font-mono text-sm text-gray-200">{agent?.address}</div>
+                                            <div className="text-[9px] text-emerald-500/60 mt-1 font-medium">Authorized for trading on Hyperliquid L1</div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            if (confirm("Revoke agent session? You'll need to re-approve a new agent to use 1-Click trading.")) {
+                                                clearSession();
+                                            }
+                                        }}
+                                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl transition-all font-bold text-xs"
+                                    >
+                                        <LogOut size={14} /> Revoke Local Session
+                                    </button>
+                                </div>
+                                <div className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-lg">
+                                    <p className="text-[10px] text-blue-400/80 leading-relaxed italic">
+                                        Note: Revoking here clears the local session. To fully revoke on-chain authority, you must sign a new ApproveAgent action or use the Hyperliquid official interface.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Keys List */}
                     <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl p-6 backdrop-blur-sm">
                         <div className="flex justify-between items-center mb-6">

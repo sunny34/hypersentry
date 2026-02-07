@@ -1,35 +1,56 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from 'react';
 import axios from 'axios';
-import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3, Newspaper, Menu, Sparkles, Skull, Command, Users, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3, Newspaper, Menu, Sparkles, Skull, Command, Users, Activity, Loader2, Settings, Shield, Maximize2 } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import { useAuth } from '@/contexts/AuthContext';
 import Sidebar from '@/components/Sidebar';
-import ChartTabs from '@/components/trading/ChartTabs';
-import OrderForm from '@/components/trading/OrderForm';
-import AIAnalysis from '@/components/trading/AIAnalysis';
-import NewsFeed from '@/components/trading/NewsFeed';
-import PremiumOrderBook from '@/components/trading/PremiumOrderBook';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useSidebar } from '@/contexts/SidebarContext';
-import DashboardPanel from '@/components/trading/DashboardPanel';
 import TokenSelector from '@/components/trading/TokenSelector';
 import TimeframeSelector from '@/components/trading/TimeframeSelector';
-import AddWalletModal from '@/components/modals/AddWalletModal';
-import ImportModal from '@/components/modals/ImportModal';
-import DepositModal from '@/components/modals/DepositModal';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useHyperliquidSession } from '@/hooks/useHyperliquidSession';
-import InsiderIntelligence from '@/components/trading/InsiderIntelligence';
-import LiquidationFirehose from '@/components/trading/LiquidationFirehose';
-import CommandPalette from '@/components/trading/CommandPalette';
-import CohortSentiment from '@/components/trading/CohortSentiment';
 import StatusBar from '@/components/trading/StatusBar';
-import TwapIntelligence from '@/components/trading/TwapIntelligence';
-import TerminalLiquidityWall from '@/components/trading/TerminalLiquidityWall';
-import TwapCompact from '@/components/trading/TwapCompact';
+import ResizableLayout from '@/components/trading/ResizableLayout';
+import { TerminalSettingsProvider, useTerminalSettings } from '@/contexts/TerminalSettingsContext';
+import TerminalSettingsModal from '@/components/modals/TerminalSettingsModal';
+
+// Lazy load heavy components for better initial load performance
+const ChartTabs = lazy(() => import('@/components/trading/ChartTabs'));
+const OrderForm = lazy(() => import('@/components/trading/OrderForm'));
+const AIAnalysis = lazy(() => import('@/components/trading/AIAnalysis'));
+const NewsFeed = lazy(() => import('@/components/trading/NewsFeed'));
+const PremiumOrderBook = lazy(() => import('@/components/trading/PremiumOrderBook'));
+const DashboardPanel = lazy(() => import('@/components/trading/DashboardPanel'));
+const InsiderIntelligence = lazy(() => import('@/components/trading/InsiderIntelligence'));
+const LiquidationFirehose = lazy(() => import('@/components/trading/LiquidationFirehose'));
+const CommandPalette = lazy(() => import('@/components/trading/CommandPalette'));
+const CohortSentiment = lazy(() => import('@/components/trading/CohortSentiment'));
+const TwapIntelligence = lazy(() => import('@/components/trading/TwapIntelligence'));
+const TerminalLiquidityWall = lazy(() => import('@/components/trading/TerminalLiquidityWall'));
+const TwapCompact = lazy(() => import('@/components/trading/TwapCompact'));
+const AddWalletModal = lazy(() => import('@/components/modals/AddWalletModal'));
+const ImportModal = lazy(() => import('@/components/modals/ImportModal'));
+const DepositModal = lazy(() => import('@/components/modals/DepositModal'));
+const ClosePositionModal = lazy(() => import('@/components/modals/ClosePositionModal'));
+const ArbScanner = lazy(() => import('@/components/trading/ArbScanner'));
+const RiskSimulator = lazy(() => import('@/components/trading/RiskSimulator'));
+const CompactArbScanner = lazy(() => import('@/components/trading/CompactArbScanner'));
+const CompactRiskSimulator = lazy(() => import('@/components/trading/CompactRiskSimulator'));
+const InstitutionalDescription = lazy(() => import('@/components/trading/InstitutionalDescription'));
+const BullBearDebate = lazy(() => import('@/components/trading/BullBearDebate'));
+
+// Loading skeleton for lazy components
+const ComponentLoader = memo(({ height = 'h-full' }: { height?: string }) => (
+    <div className={`${height} w-full flex items-center justify-center bg-black/20 rounded-lg animate-pulse`}>
+        <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+    </div>
+));
+ComponentLoader.displayName = 'ComponentLoader';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+
 
 interface Token {
     symbol: string;
@@ -45,14 +66,23 @@ interface Token {
 }
 
 export default function TradingTerminal() {
+    return (
+        <TerminalSettingsProvider>
+            <TradingTerminalContent />
+        </TerminalSettingsProvider>
+    );
+}
+
+function TradingTerminalContent() {
     const { user, token, isAuthenticated, isLoading: authLoading, login } = useAuth();
     const { isCollapsed } = useSidebar();
+    const { settings } = useTerminalSettings();
 
     // WS Hook
     const { isConnected: isWsConnected, lastMessage } = useWebSocket(`${API_URL}/ws`.replace('http', 'ws'));
 
     // Session Hook
-    const { agent, isAgentActive, enableSession, isLoading: isSessionLoading } = useHyperliquidSession();
+    const { agent, isAgentActive, enableSession, isLoading: isSessionLoading, error } = useHyperliquidSession();
 
     // User State
     const { address: walletAddress } = useAccount();
@@ -62,7 +92,7 @@ export default function TradingTerminal() {
     const [tokens, setTokens] = useState<Token[]>([]);
     const [selectedToken, setSelectedToken] = useState<string>('BTC');
     const [selectedInterval, setSelectedInterval] = useState('60');
-    const [activeTab, setActiveTab] = useState<'analysis' | 'news' | 'liquidations' | 'positions' | 'orders' | 'cohorts' | 'twap'>('positions');
+    const [activeTab, setActiveTab] = useState<'analysis' | 'news' | 'liquidations' | 'positions' | 'orders' | 'cohorts' | 'twap' | 'pro'>('positions');
     const [aiBias, setAiBias] = useState<'bullish' | 'bearish' | 'neutral'>('neutral');
     const [currentPrice, setCurrentPrice] = useState<number>(0);
     const [priceChangePercent, setPriceChangePercent] = useState<number>(0);
@@ -75,6 +105,31 @@ export default function TradingTerminal() {
     const [mobileTab, setMobileTab] = useState<'chart' | 'book' | 'order' | 'intel'>('chart');
     const [showCommandPalette, setShowCommandPalette] = useState(false);
     const [showIntelSidebar, setShowIntelSidebar] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
+    const [showCloseModal, setShowCloseModal] = useState(false);
+    const [selectedPositionToClose, setSelectedPositionToClose] = useState<any>(null);
+    const [isHubMaximized, setIsHubMaximized] = useState(false);
+
+    const activeTabs = useMemo(() => {
+        const allTabs = [
+            { id: 'positions', label: 'Positions', icon: Zap, color: 'text-blue-400' },
+            { id: 'orders', label: 'Orders', icon: Minus, color: 'text-orange-400' },
+            { id: 'analysis', label: 'AI Intel', icon: Sparkles, color: 'text-purple-400' },
+            { id: 'twap', label: 'TWAP Intel', icon: Activity, color: 'text-purple-500' },
+            { id: 'pro', label: 'Pro', icon: Shield, color: 'text-emerald-400' },
+            { id: 'cohorts', label: 'Social', icon: Users, color: 'text-teal-400' },
+            { id: 'news', label: 'News', icon: Newspaper, color: 'text-blue-300' },
+            { id: 'liquidations', label: 'Firehose', icon: Skull, color: 'text-red-400' },
+        ];
+        return allTabs.filter(tab => settings.tabs.find(t => t.id === tab.id)?.enabled);
+    }, [settings.tabs]);
+
+    // Ensure activeTab is valid if current one is disabled
+    useEffect(() => {
+        if (!activeTabs.find(t => t.id === activeTab) && activeTabs.length > 0) {
+            setActiveTab(activeTabs[0].id as any);
+        }
+    }, [activeTabs, activeTab]);
 
     // Trading Data
     const [positions, setPositions] = useState<any[]>([]);
@@ -95,6 +150,31 @@ export default function TradingTerminal() {
         setActiveIndicators(next);
     };
 
+    // Load saved workspace state
+    useEffect(() => {
+        const savedToken = localStorage.getItem('hl_selected_token');
+        if (savedToken) setSelectedToken(savedToken);
+
+        const savedInterval = localStorage.getItem('hl_selected_interval');
+        if (savedInterval) setSelectedInterval(savedInterval);
+
+        const savedTab = localStorage.getItem('hl_active_tab');
+        if (savedTab) setActiveTab(savedTab as any);
+    }, []);
+
+    // Save workspace state on changes
+    useEffect(() => {
+        localStorage.setItem('hl_selected_token', selectedToken);
+    }, [selectedToken]);
+
+    useEffect(() => {
+        localStorage.setItem('hl_selected_interval', selectedInterval);
+    }, [selectedInterval]);
+
+    useEffect(() => {
+        localStorage.setItem('hl_active_tab', activeTab);
+    }, [activeTab]);
+
     // Keyboard Shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -108,7 +188,9 @@ export default function TradingTerminal() {
             if (e.key === '1') setActiveTab('positions');
             if (e.key === '2') setActiveTab('orders');
             if (e.key === '3') setActiveTab('analysis');
-            if (e.key === '4') setActiveTab('cohorts');
+            if (e.key === '4') setActiveTab('twap');
+            if (e.key === '5') setActiveTab('pro');
+            if (e.key === '6') setActiveTab('cohorts');
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
@@ -129,28 +211,68 @@ export default function TradingTerminal() {
         return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
     }, [token]);
 
-    // Fetch User Data (Balance, Positions, Orders)
+    // Fetch User Data (Balance, Positions, Orders) - Direct from Hyperliquid
     useEffect(() => {
+        const HYPERLIQUID_API = 'https://api.hyperliquid.xyz';
+
         const fetchData = async () => {
             const targetAddress = walletAddress || (user?.wallets?.[0]?.address);
             if (!targetAddress) return;
 
             try {
-                const resAcc = await axios.get(`${API_URL}/trading/account?user=${targetAddress}`);
-                if (resAcc.data && resAcc.data.marginSummary) {
-                    const equity = parseFloat(resAcc.data.marginSummary.accountValue) || 0;
-                    setWalletBalance(equity);
-                    setPositions(resAcc.data.assetPositions || []);
+                // Fetch user state directly from Hyperliquid API
+                const [clearingRes, ordersRes] = await Promise.all([
+                    axios.post(`${HYPERLIQUID_API}/info`, {
+                        type: "clearinghouseState",
+                        user: targetAddress
+                    }),
+                    axios.post(`${HYPERLIQUID_API}/info`, {
+                        type: "openOrders",
+                        user: targetAddress
+                    })
+                ]);
+
+                // Parse balance from clearinghouse state
+                if (clearingRes.data && clearingRes.data.marginSummary) {
+                    const accountValue = parseFloat(clearingRes.data.marginSummary.accountValue) || 0;
+                    setWalletBalance(accountValue);
+
+                    // Parse positions
+                    if (clearingRes.data.assetPositions) {
+                        const activePositions = clearingRes.data.assetPositions
+                            .filter((p: any) => parseFloat(p.position?.szi || '0') !== 0)
+                            .map((p: any) => ({
+                                coin: p.position.coin,
+                                size: parseFloat(p.position.szi || '0'),
+                                entryPrice: parseFloat(p.position.entryPx || '0'),
+                                unrealizedPnl: parseFloat(p.position.unrealizedPnl || '0'),
+                                leverage: p.position.leverage?.value || 1,
+                                marginUsed: parseFloat(p.position.marginUsed || '0'),
+                                liquidationPx: parseFloat(p.position.liquidationPx || '0'),
+                            }));
+                        setPositions(activePositions);
+                    }
                 }
 
-                const resOrders = await axios.get(`${API_URL}/trading/orders/open?user=${targetAddress}`);
-                if (resOrders.data && resOrders.data.orders) {
-                    setOpenOrders(resOrders.data.orders);
+                // Parse open orders
+                if (ordersRes.data && Array.isArray(ordersRes.data)) {
+                    setOpenOrders(ordersRes.data);
                 }
             } catch (e) {
-                console.error("Failed to fetch user data", e);
+                console.error('Failed to fetch Hyperliquid data:', e);
+                // Fallback to backend if direct call fails
+                try {
+                    const resAcc = await axios.get(`${API_URL}/trading/account?user=${targetAddress}`);
+                    if (resAcc.data?.marginSummary) {
+                        setWalletBalance(parseFloat(resAcc.data.marginSummary.accountValue) || 0);
+                        setPositions(resAcc.data.assetPositions || []);
+                    }
+                } catch {
+                    // Both methods failed
+                }
             }
         };
+
         fetchData();
         const interval = setInterval(fetchData, 5000);
         return () => clearInterval(interval);
@@ -158,48 +280,100 @@ export default function TradingTerminal() {
 
     // Action Handlers
     const handleClosePosition = async (position: any) => {
-        if (!isAgentActive || !agent) {
-            alert("Please enable 1-Click Trading (Agent) to close positions instantly.");
+        // Handle both raw HL format and our internal Dashboard format
+        const raw = position.position || position;
+        const size = parseFloat(raw.szi || raw.size || '0');
+        const coin = raw.coin;
+
+        // Find best possible mark price
+        const markPrice = tokens.find(t => t.symbol === coin)?.price ||
+            parseFloat(raw.markPx || raw.markPrice || '0') ||
+            currentPrice;
+
+        setSelectedPositionToClose({
+            coin: coin,
+            size: size,
+            markPrice: markPrice,
+            side: size > 0 ? 'LONG' : 'SHORT',
+            pnl: parseFloat(raw.unrealizedPnl || raw.pnl || '0'),
+            coinIndex: (window as any)._assetMap?.[coin]
+        });
+        setShowCloseModal(true);
+    };
+
+    const handleConfirmClose = async (price: number | 'market', size: number) => {
+        if (!isAgentActive || !agent || !selectedPositionToClose) {
+            setNotification({
+                title: 'Agent Required',
+                message: 'Please enable 1-Click Trading to close positions.',
+                type: 'neutral'
+            });
             return;
         }
+
         try {
             const { ethers } = await import('ethers');
-            const { signAgentAction } = await import('../../utils/signing');
+            const { signAgentAction, floatToWire } = await import('../../utils/signing');
 
             const wallet = new ethers.Wallet(agent.privateKey);
             const nonce = Date.now();
 
-            const size = parseFloat(position.position.szi);
-            const isBuy = size < 0;
+            const isBuy = selectedPositionToClose.size < 0;
+            const coinIndex = selectedPositionToClose.coinIndex;
 
-            const orderRequest = {
-                a: position.position.coinIndex,
-                b: isBuy,
-                p: isBuy ? "1000000" : "0.001",
-                s: Math.abs(size).toString(),
-                r: true,
-                t: { limit: { tif: "Gtc" } }
-            };
+            if (coinIndex === undefined) throw new Error(`Asset index for ${selectedPositionToClose.coin} not found.`);
+
+            // For 'market' close, we use a sane slippage (5%) instead of $1M to avoid L1 protection
+            const markPx = selectedPositionToClose.markPrice || currentPrice;
+            const finalPrice = price === 'market'
+                ? (isBuy ? markPx * 1.05 : markPx * 0.95)
+                : price;
 
             const action = {
                 type: "order",
-                orders: [orderRequest],
+                orders: [{
+                    a: coinIndex,
+                    b: isBuy,
+                    p: floatToWire(finalPrice),
+                    s: size.toString(),
+                    r: true,
+                    t: { limit: { tif: price === 'market' ? "Ioc" : "Gtc" } }
+                }],
                 grouping: "na"
             };
 
-            const signedPayload = await signAgentAction(wallet, action, nonce, null);
-            await axios.post(`${API_URL}/trading/order`, signedPayload);
-        } catch (e) {
-            console.error(e);
-            alert("Failed to close position: " + (e as Error).message);
+            const signedPayload = await signAgentAction(wallet, action, nonce);
+            const res = await axios.post(`${API_URL}/trading/order`, signedPayload, getAuthConfig());
+
+            if (res.data.status === 'ok' && !res.data.response?.data?.statuses?.[0]?.error) {
+                setNotification({
+                    title: 'Position Processed',
+                    message: `Successfully sent close order for ${selectedPositionToClose.coin}.`,
+                    type: 'bullish'
+                });
+            } else {
+                const err = res.data.response?.data?.statuses?.[0]?.error || res.data.error || 'Execution failed';
+                throw new Error(err);
+            }
+        } catch (e: any) {
+            setNotification({
+                title: 'Close Failed',
+                message: e.message || 'Network error while closing position.',
+                type: 'bearish'
+            });
         }
     };
 
     const handleCancelOrder = async (order: any) => {
         if (!isAgentActive || !agent) {
-            alert("Please enable 1-Click Trading.");
+            setNotification({
+                title: 'Agent Required',
+                message: 'Enable 1-Click Trading to cancel orders.',
+                type: 'neutral'
+            });
             return;
         }
+
         try {
             const { ethers } = await import('ethers');
             const { signAgentAction } = await import('../../utils/signing');
@@ -210,21 +384,30 @@ export default function TradingTerminal() {
             const action = {
                 type: "cancel",
                 cancels: [{
-                    a: order.coinIndex || 0,
+                    a: order.asset || order.coinIndex || (window as any)._assetMap?.[order.coin] || 0,
                     o: order.oid
                 }]
             };
 
-            const token = tokens.find(t => t.symbol === order.coin);
-            if (token && order.a === undefined) {
-                // Fallback logic
-            }
+            const signedPayload = await signAgentAction(wallet, action, nonce);
+            const res = await axios.post(`${API_URL}/trading/cancel`, signedPayload, getAuthConfig());
 
-            const signedPayload = await signAgentAction(wallet, action, nonce, null);
-            await axios.post(`${API_URL}/trading/cancel`, signedPayload);
-        } catch (e) {
-            console.error(e);
-            alert("Failed to cancel order: " + (e as Error).message);
+            if (res.data.status === 'ok' && !res.data.response?.data?.statuses?.[0]?.error) {
+                setNotification({
+                    title: 'Order Cancelled',
+                    message: `ID: ${order.oid} removed from book.`,
+                    type: 'neutral'
+                });
+            } else {
+                const err = res.data.response?.data?.statuses?.[0]?.error || res.data.error || 'Cancellation failed';
+                throw new Error(err);
+            }
+        } catch (e: any) {
+            setNotification({
+                title: 'Cancel Failed',
+                message: e.message || 'Network error during cancellation.',
+                type: 'bearish'
+            });
         }
     };
 
@@ -255,8 +438,8 @@ export default function TradingTerminal() {
                     });
                     (window as any)._assetMap = map;
                 }
-            } catch (e) {
-                console.error("Failed to fetch tokens", e);
+            } catch {
+                // Silently handle - tokens fetch failed, will retry
             } finally {
                 if (active) setIsLoadingTokens(false);
             }
@@ -294,8 +477,8 @@ export default function TradingTerminal() {
                         setPriceChangePercent(change);
                     }
                 }
-            } catch (e) {
-                console.error('Price fetch failed');
+            } catch {
+                // Silently handle - price fetch failed, will retry
             }
         };
 
@@ -304,21 +487,28 @@ export default function TradingTerminal() {
         return () => clearInterval(interval);
     }, [selectedToken, tokens]);
 
-    const formatPrice = (price: number) => {
+    // Memoized formatting functions to prevent recreation on every render
+    const formatPrice = useCallback((price: number) => {
         if (!price) return '$0.00';
         if (price >= 1000) return `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         if (price >= 1) return `$${price.toFixed(4)}`;
         return `$${price.toFixed(6)}`;
-    };
+    }, []);
 
-    const formatCompact = (num: number) => {
+    const formatCompact = useCallback((num: number) => {
         return new Intl.NumberFormat('en-US', {
             notation: 'compact',
             maximumFractionDigits: 1,
             style: 'currency',
             currency: 'USD'
         }).format(num);
-    };
+    }, []);
+
+    // Memoize selected token data to avoid repeated lookups
+    const selectedTokenData = useMemo(() =>
+        tokens.find(t => t.symbol === selectedToken),
+        [tokens, selectedToken]
+    );
 
     if (authLoading) {
         return (
@@ -365,7 +555,6 @@ export default function TradingTerminal() {
 
                 {/* Top Header Bar - Minimalist like Hyperdash */}
                 <div className="h-10 bg-black/80 border-b border-white/5 flex items-center px-4 gap-4 flex-shrink-0">
-                    {/* Token Selector & Stats */}
                     <div className="flex items-center gap-3">
                         <TokenSelector
                             selectedToken={selectedToken}
@@ -376,7 +565,6 @@ export default function TradingTerminal() {
                             }}
                         />
 
-                        {/* Current Price */}
                         <div className="flex items-center gap-2 pl-3 border-l border-white/10">
                             <span className={`text-sm font-mono font-black ${priceChangePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                 {formatPrice(currentPrice)}
@@ -387,29 +575,27 @@ export default function TradingTerminal() {
                         </div>
                     </div>
 
-                    {/* Center Stats */}
                     <div className="hidden md:flex items-center gap-6 ml-4">
                         <div className="flex flex-col leading-tight">
                             <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">24h Vol</span>
                             <span className="text-[10px] font-mono font-bold text-gray-300">
-                                {formatCompact(tokens.find(t => t.symbol === selectedToken)?.volume24h || 0)}
+                                {formatCompact(selectedTokenData?.volume24h || 0)}
                             </span>
                         </div>
                         <div className="flex flex-col leading-tight">
                             <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">OI</span>
                             <span className="text-[10px] font-mono font-bold text-gray-300">
-                                {formatCompact(tokens.find(t => t.symbol === selectedToken)?.openInterest || 0)}
+                                {formatCompact(selectedTokenData?.openInterest || 0)}
                             </span>
                         </div>
                         <div className="flex flex-col leading-tight">
                             <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">Funding</span>
-                            <span className={`text-[10px] font-mono font-bold ${(tokens.find(t => t.symbol === selectedToken)?.funding || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {((tokens.find(t => t.symbol === selectedToken)?.funding || 0) * 100).toFixed(4)}%
+                            <span className={`text-[10px] font-mono font-bold ${(selectedTokenData?.funding || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {((selectedTokenData?.funding || 0) * 100).toFixed(4)}%
                             </span>
                         </div>
                     </div>
 
-                    {/* TWAP Quick View - At-a-glance whale activity */}
                     <div className="hidden lg:block ml-4">
                         <TwapCompact
                             symbol={selectedToken}
@@ -417,14 +603,11 @@ export default function TradingTerminal() {
                         />
                     </div>
 
-                    {/* Right Controls */}
                     <div className="ml-auto flex items-center gap-3">
-                        {/* Timeframe */}
                         <div className="hidden sm:block">
                             <TimeframeSelector selected={selectedInterval} onSelect={setSelectedInterval} />
                         </div>
 
-                        {/* Indicators Menu */}
                         <div className="relative" ref={indicatorMenuRef}>
                             <button
                                 onClick={() => setShowIndicatorMenu(!showIndicatorMenu)}
@@ -435,7 +618,7 @@ export default function TradingTerminal() {
                             </button>
 
                             {showIndicatorMenu && (
-                                <div className="absolute top-full right-0 mt-1 w-48 bg-[#0b0b0b] border border-gray-800 rounded-xl shadow-2xl py-1.5 flex flex-col z-[100] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                <div className="absolute top-full right-0 mt-1 w-48 bg-[#0b0b0b] border border-gray-800 rounded-xl shadow-2xl py-1.5 flex flex-col z-[100] overflow-hidden">
                                     {['EMA 50', 'EMA 200', 'Supertrend', 'Elliot Wave', 'Bollinger Bands', 'VWAP', 'Parabolic SAR'].map(ind => (
                                         <button
                                             key={ind}
@@ -443,16 +626,13 @@ export default function TradingTerminal() {
                                             className={`px-3 py-2 text-left text-xs font-mono hover:bg-white/5 flex items-center justify-between transition-colors ${activeIndicators.has(ind) ? 'text-blue-400 bg-blue-500/5' : 'text-gray-500'}`}
                                         >
                                             <span>{ind}</span>
-                                            {activeIndicators.has(ind) && (
-                                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_6px_#3b82f6]" />
-                                            )}
+                                            {activeIndicators.has(ind) && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_6px_#3b82f6]" />}
                                         </button>
                                     ))}
                                 </div>
                             )}
                         </div>
 
-                        {/* Command Palette Trigger */}
                         <button
                             onClick={() => setShowCommandPalette(true)}
                             className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/20 transition-all"
@@ -466,200 +646,322 @@ export default function TradingTerminal() {
                 </div>
 
                 <div className="p-1.5 flex-1 flex flex-col h-full overflow-hidden gap-1.5 w-full">
-                    <div className="flex flex-col flex-1 min-h-0 relative lg:overflow-hidden w-full">
-                        {/* Upper Section: Chart & Integrated Sidebar */}
-                        <div className="flex flex-col lg:flex-row gap-1.5 min-h-0 pb-1.5 shrink-0 h-[60%] w-full">
-                            {/* Left Panel - Primary Charting Workspace (reduced width) */}
-                            <div className={`lg:w-[55%] min-w-0 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden h-full flex flex-col relative ${mobileTab === 'chart' ? 'flex' : 'hidden lg:flex'}`}>
-                                <ChartTabs
-                                    symbol={selectedToken}
-                                    interval={selectedInterval}
-                                    positions={positions}
-                                    openOrders={openOrders}
-                                    bias={aiBias}
-                                    onPriceSelect={(px: string) => setBookPrice(px)}
-                                    currentPrice={currentPrice}
-                                    openInterest={tokens.find(t => t.symbol === selectedToken)?.openInterest || 0}
-                                    fundingRate={tokens.find(t => t.symbol === selectedToken)?.funding || 0}
-                                    activeIndicators={activeIndicators}
+                    {/* Desktop: Resizable Layout */}
+                    <div className="hidden lg:flex flex-col flex-1 min-h-0 relative overflow-hidden w-full">
+                        <Suspense fallback={<ComponentLoader />}>
+                            {isHubMaximized ? (
+                                <div className="absolute inset-0 z-[60] bg-[#050505] flex flex-col">
+                                    <div className="flex-1 flex overflow-hidden">
+                                        <div className="w-[52px] border-r border-white/5 bg-[#0a0a0a] flex flex-col items-center py-4 gap-4">
+                                            {activeTabs.map((tab: any) => (
+                                                <button
+                                                    key={tab.id}
+                                                    onClick={() => setActiveTab(tab.id as any)}
+                                                    className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${activeTab === tab.id ? 'bg-blue-500/10 text-white' : 'text-gray-500 hover:bg-white/5'}`}
+                                                    title={tab.label}
+                                                >
+                                                    <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? tab.color : 'text-gray-600'}`} />
+                                                </button>
+                                            ))}
+                                            <div className="mt-auto py-4 border-t border-white/5 w-full flex justify-center">
+                                                <button onClick={() => setIsHubMaximized(false)} className="w-10 h-10 flex items-center justify-center rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all">
+                                                    <Maximize2 className="w-5 h-5 rotate-180" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-hidden relative">
+                                            {activeTab === 'pro' ? (
+                                                <div className="grid grid-cols-2 grid-rows-2 h-full p-4 gap-4 bg-black">
+                                                    <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl overflow-hidden shadow-2xl relative">
+                                                        <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500" />
+                                                        <ArbScanner />
+                                                    </div>
+                                                    <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl overflow-hidden shadow-2xl relative">
+                                                        <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-500" />
+                                                        <InstitutionalDescription symbol={selectedToken} />
+                                                    </div>
+                                                    <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl overflow-hidden shadow-2xl relative">
+                                                        <div className="absolute top-0 left-0 w-1.5 h-full bg-red-500" />
+                                                        <RiskSimulator />
+                                                    </div>
+                                                    <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl overflow-hidden shadow-2xl relative">
+                                                        <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500" />
+                                                        <BullBearDebate symbol={selectedToken} />
+                                                    </div>
+                                                </div>
+                                            ) : activeTab === 'twap' ? (
+                                                <div className="h-full p-4 bg-black overflow-hidden flex flex-col">
+                                                    <TwapIntelligence symbol={selectedToken} />
+                                                </div>
+                                            ) : (
+                                                <div className="h-full bg-black">
+                                                    <DashboardPanel
+                                                        isAuthenticated={isAuthenticated || !!walletAddress}
+                                                        positions={positions}
+                                                        openOrders={openOrders}
+                                                        tokens={tokens}
+                                                        onSelectToken={setSelectedToken}
+                                                        onClosePosition={handleClosePosition}
+                                                        onCancelOrder={handleCancelOrder}
+                                                        onAnalyze={handleAnalyzePosition}
+                                                        activeTabOverride={activeTab === 'analysis' ? 'positions' : activeTab as any}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <ResizableLayout
+                                    visiblePanels={{
+                                        chart: settings.panels.find(p => p.id === 'chart')?.enabled ?? true,
+                                        orderBook: settings.panels.find(p => p.id === 'orderBook')?.enabled ?? true,
+                                        orderForm: settings.panels.find(p => p.id === 'orderForm')?.enabled ?? true,
+                                        console: settings.panels.find(p => p.id === 'console')?.enabled ?? true,
+                                    }}
+                                    chartPanel={
+                                        <ChartTabs
+                                            symbol={selectedToken}
+                                            interval={selectedInterval}
+                                            positions={positions}
+                                            openOrders={openOrders}
+                                            bias={aiBias}
+                                            onPriceSelect={(px: string) => setBookPrice(px)}
+                                            currentPrice={currentPrice}
+                                            openInterest={selectedTokenData?.openInterest || 0}
+                                            fundingRate={selectedTokenData?.funding || 0}
+                                            activeIndicators={activeIndicators}
+                                        />
+                                    }
+                                    orderBookPanel={
+                                        <PremiumOrderBook
+                                            coin={selectedToken}
+                                            currentPrice={currentPrice}
+                                            onSelectPrice={(px) => setBookPrice(px)}
+                                            onSelectSize={(sz) => setBookSize(sz)}
+                                        />
+                                    }
+                                    orderFormPanel={
+                                        <OrderForm
+                                            symbol={selectedToken}
+                                            currentPrice={currentPrice}
+                                            isAuthenticated={isAuthenticated}
+                                            token={token}
+                                            walletBalance={walletBalance}
+                                            agent={agent}
+                                            isAgentActive={isAgentActive}
+                                            onEnableAgent={enableSession}
+                                            onLogin={() => login('google')}
+                                            onDeposit={() => setShowDeposit(true)}
+                                            selectedPrice={bookPrice}
+                                            selectedSize={bookSize}
+                                            error={error || undefined}
+                                        />
+                                    }
+                                    consolePanel={
+                                        <div className="flex h-full group/hub bg-[#050505]/40">
+                                            <div className="w-[48px] border-r border-white/5 bg-[#0a0a0a] flex flex-col items-center py-3 gap-3 relative z-10 transition-all hover:w-[120px] overflow-hidden">
+                                                {activeTabs.map((tab: any) => (
+                                                    <button
+                                                        key={tab.id}
+                                                        onClick={() => setActiveTab(tab.id as any)}
+                                                        className={`w-full flex items-center px-4 py-2 gap-3 transition-all relative group ${activeTab === tab.id ? 'text-white' : 'text-gray-500 hover:text-gray-200'}`}
+                                                    >
+                                                        {activeTab === tab.id && <div className="absolute left-0 w-0.5 h-6 bg-blue-500 rounded-r-full" />}
+                                                        <tab.icon className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${activeTab === tab.id ? tab.color : 'text-gray-600'}`} />
+                                                        <span className={`text-[9px] font-black uppercase tracking-widest whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${activeTab === tab.id ? 'text-white' : 'text-gray-500'}`}>
+                                                            {tab.label}
+                                                        </span>
+                                                    </button>
+                                                ))}
+
+                                                <div className="mt-auto pt-4 border-t border-white/5 w-full flex flex-col items-center gap-3">
+                                                    <button onClick={() => setIsHubMaximized(true)} className="p-2 text-gray-500 hover:text-white transition-colors" title="Maximize Workspace">
+                                                        <Maximize2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button onClick={() => setShowSettings(true)} className="p-2 text-gray-500 hover:text-white transition-colors" title="Configure Hub Tabs">
+                                                        <Settings className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex-1 overflow-hidden relative">
+                                                {['positions', 'orders', 'analysis'].includes(activeTab) ? (
+                                                    <div className="flex h-full">
+                                                        <div className="flex-1 border-r border-white/5 overflow-hidden">
+                                                            <DashboardPanel
+                                                                isAuthenticated={isAuthenticated || !!walletAddress}
+                                                                positions={positions}
+                                                                openOrders={openOrders}
+                                                                tokens={tokens}
+                                                                onSelectToken={setSelectedToken}
+                                                                onClosePosition={handleClosePosition}
+                                                                onCancelOrder={handleCancelOrder}
+                                                                onAnalyze={handleAnalyzePosition}
+                                                                activeTabOverride={activeTab === 'analysis' ? 'positions' : activeTab as any}
+                                                            />
+                                                        </div>
+                                                        <div className="w-[380px] shrink-0 bg-black/30">
+                                                            <AIAnalysis
+                                                                symbol={selectedToken}
+                                                                interval={selectedInterval}
+                                                                positionContext={aiPositionContext}
+                                                                onClosePosition={handleClosePosition}
+                                                                onAnalysisUpdate={(analysis) => {
+                                                                    const bias = analysis.direction === 'long' ? 'bullish' : analysis.direction === 'short' ? 'bearish' : 'neutral';
+                                                                    setAiBias(bias);
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                ) : activeTab === 'pro' ? (
+                                                    <div className="grid grid-cols-2 grid-rows-2 h-full p-2 gap-2 overflow-hidden bg-black/40">
+                                                        <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
+                                                            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/50" />
+                                                            <CompactArbScanner />
+                                                        </div>
+                                                        <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
+                                                            <div className="absolute top-0 left-0 w-1 h-full bg-amber-500/50" />
+                                                            <InstitutionalDescription symbol={selectedToken} />
+                                                        </div>
+                                                        <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
+                                                            <div className="absolute top-0 left-0 w-1 h-full bg-red-500/50" />
+                                                            <CompactRiskSimulator />
+                                                        </div>
+                                                        <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
+                                                            <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500/50" />
+                                                            <BullBearDebate symbol={selectedToken} />
+                                                        </div>
+                                                    </div>
+                                                ) : activeTab === 'twap' ? (
+                                                    <div className="flex h-full gap-1.5 p-1.5 overflow-hidden">
+                                                        <div className="flex-1 min-w-0">
+                                                            <TwapIntelligence symbol={selectedToken} />
+                                                        </div>
+                                                        <div className="w-[320px] shrink-0">
+                                                            <TerminalLiquidityWall coin={selectedToken} currentPrice={currentPrice} onPriceClick={(px) => setBookPrice(px.toString())} />
+                                                        </div>
+                                                    </div>
+                                                ) : activeTab === 'cohorts' ? (
+                                                    <CohortSentiment symbol={selectedToken} />
+                                                ) : activeTab === 'news' ? (
+                                                    <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
+                                                ) : (
+                                                    <LiquidationFirehose />
+                                                )}
+                                            </div>
+                                        </div>
+                                    }
                                 />
-                            </div>
+                            )}
+                        </Suspense>
+                    </div>
 
-                            {/* Right Panel - OrderBook & OrderForm Side by Side */}
-                            <div className={`lg:flex-1 shrink-0 flex flex-row gap-1.5 min-h-0 ${mobileTab === 'order' || mobileTab === 'book' ? 'flex' : 'hidden lg:flex'}`}>
-                                {/* Premium Order Book Pane (LEFT) */}
-                                <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden relative">
-                                    <PremiumOrderBook
-                                        coin={selectedToken}
-                                        currentPrice={currentPrice}
-                                        onSelectPrice={(px) => setBookPrice(px)}
-                                        onSelectSize={(sz) => setBookSize(sz)}
-                                    />
-                                </div>
-                                {/* Order Entry Pane (RIGHT) */}
-                                <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 hover:scrollbar-thumb-white/20 flex flex-col">
-                                    <OrderForm
+                    {/* Mobile Layout */}
+                    <div className="lg:hidden flex flex-col flex-1 min-h-0 relative overflow-hidden w-full">
+                        <Suspense fallback={<ComponentLoader />}>
+                            <div className="flex flex-col gap-1.5 min-h-0 pb-1.5 shrink-0 h-[60%] w-full">
+                                <div className={`min-w-0 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden h-full flex flex-col relative ${mobileTab === 'chart' ? 'flex' : 'hidden'}`}>
+                                    <ChartTabs
                                         symbol={selectedToken}
+                                        interval={selectedInterval}
+                                        positions={positions}
+                                        openOrders={openOrders}
+                                        bias={aiBias}
+                                        onPriceSelect={(px: string) => setBookPrice(px)}
                                         currentPrice={currentPrice}
-                                        isAuthenticated={isAuthenticated}
-                                        token={token}
-                                        walletBalance={walletBalance}
-                                        agent={agent}
-                                        isAgentActive={isAgentActive}
-                                        onEnableAgent={enableSession}
-                                        onLogin={() => login('google')}
-                                        onDeposit={() => setShowDeposit(true)}
-                                        selectedPrice={bookPrice}
-                                        selectedSize={bookSize}
+                                        openInterest={selectedTokenData?.openInterest || 0}
+                                        fundingRate={selectedTokenData?.funding || 0}
+                                        activeIndicators={activeIndicators}
                                     />
                                 </div>
-                            </div>
-                        </div>
 
-                        {/* Mobile Tab Bar */}
-                        <div className="lg:hidden flex bg-gray-950 border-t border-white/10 p-1 shrink-0 h-12">
-                            <button
-                                onClick={() => setMobileTab('chart')}
-                                className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'chart' ? 'text-blue-500 bg-blue-500/10' : 'text-gray-500'}`}
-                            >
-                                <BarChart3 className="w-4 h-4" />
-                                <span className="text-[8px] font-black uppercase">Chart</span>
-                            </button>
-                            <button
-                                onClick={() => setMobileTab('book')}
-                                className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'book' ? 'text-purple-500 bg-purple-500/10' : 'text-gray-500'}`}
-                            >
-                                <RefreshCw className="w-4 h-4" />
-                                <span className="text-[8px] font-black uppercase">Book</span>
-                            </button>
-                            <button
-                                onClick={() => setMobileTab('order')}
-                                className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'order' ? 'text-emerald-500 bg-emerald-500/10' : 'text-gray-500'}`}
-                            >
-                                <Zap className="w-4 h-4" />
-                                <span className="text-[8px] font-black uppercase">Trade</span>
-                            </button>
-                            <button
-                                onClick={() => setMobileTab('intel')}
-                                className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'intel' ? 'text-amber-500 bg-amber-500/10' : 'text-gray-500'}`}
-                            >
-                                <Sparkles className="w-4 h-4" />
-                                <span className="text-[8px] font-black uppercase">Intel</span>
-                            </button>
-                        </div>
-
-                        {/* Consolidated Lower Section: The Terminal Console */}
-                        <div className={`flex flex-col flex-1 min-h-0 lg:h-[40%] w-full bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden ${mobileTab === 'intel' ? 'flex lg:flex' : 'hidden lg:flex'}`}>
-                            {/* Terminal Tabs Navigation */}
-                            <div className="flex bg-black/60 border-b border-white/5 px-2 pt-1.5 gap-0.5">
-                                {[
-                                    { id: 'positions', label: 'Positions', icon: Zap, color: 'text-blue-400' },
-                                    { id: 'orders', label: 'Orders', icon: Minus, color: 'text-orange-400' },
-                                    { id: 'analysis', label: 'AI Intel', icon: Sparkles, color: 'text-purple-400' },
-                                    { id: 'twap', label: 'TWAP Intel', icon: Activity, color: 'text-purple-500' },
-                                    { id: 'cohorts', label: 'Social', icon: Users, color: 'text-teal-400' },
-                                    { id: 'news', label: 'News', icon: Newspaper, color: 'text-blue-300' },
-                                    { id: 'liquidations', label: 'Firehose', icon: Skull, color: 'text-red-400' },
-                                ].map((tab) => (
-                                    <button
-                                        key={tab.id}
-                                        onClick={() => setActiveTab(tab.id as any)}
-                                        className={`px-3 py-1.5 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider transition-all rounded-t-lg ${activeTab === tab.id
-                                            ? 'bg-white/5 text-white border-t border-l border-r border-white/10'
-                                            : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.02]'
-                                            }`}
-                                    >
-                                        <tab.icon className={`w-3 h-3 ${activeTab === tab.id ? tab.color : ''}`} />
-                                        {tab.label}
-                                        {tab.id === 'positions' && positions.length > 0 && (
-                                            <span className="bg-blue-500 text-black px-1.5 rounded-full text-[7px] ml-0.5">{positions.length}</span>
-                                        )}
-                                    </button>
-                                ))}
-                            </div>
-
-                            {/* Tab Content Area */}
-                            <div className="flex-1 overflow-hidden relative">
-                                {['positions', 'orders', 'analysis'].includes(activeTab) ? (
-                                    <div className="flex h-full">
-                                        {/* Dashboard Portion */}
-                                        <div className="flex-1 border-r border-white/5 overflow-hidden">
-                                            <DashboardPanel
-                                                isAuthenticated={isAuthenticated || !!walletAddress}
-                                                positions={positions}
-                                                openOrders={openOrders}
-                                                tokens={tokens}
-                                                onSelectToken={setSelectedToken}
-                                                onClosePosition={handleClosePosition}
-                                                onCancelOrder={handleCancelOrder}
-                                                onAnalyze={handleAnalyzePosition}
-                                                activeTabOverride={activeTab === 'analysis' ? 'positions' : activeTab as any}
-                                            />
-                                        </div>
-                                        {/* Analysis Portion */}
-                                        <div className="w-[380px] shrink-0 bg-black/30">
-                                            <AIAnalysis
-                                                symbol={selectedToken}
-                                                interval={selectedInterval}
-                                                positionContext={aiPositionContext}
-                                                onClosePosition={handleClosePosition}
-                                                onAnalysisUpdate={(analysis) => {
-                                                    const bias = analysis.direction === 'long' ? 'bullish' :
-                                                        analysis.direction === 'short' ? 'bearish' : 'neutral';
-                                                    setAiBias(bias);
-                                                }}
-                                            />
-                                        </div>
+                                <div className={`shrink-0 flex flex-row gap-1.5 min-h-0 ${mobileTab === 'order' || mobileTab === 'book' ? 'flex' : 'hidden'}`}>
+                                    <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden relative">
+                                        <PremiumOrderBook coin={selectedToken} currentPrice={currentPrice} onSelectPrice={(px) => setBookPrice(px)} onSelectSize={(sz) => setBookSize(sz)} />
                                     </div>
-                                ) : activeTab === 'twap' ? (
-                                    <div className="flex h-full gap-1.5 p-1.5 overflow-hidden">
-                                        <div className="flex-1 min-w-0">
-                                            <TwapIntelligence symbol={selectedToken} />
-                                        </div>
-                                        <div className="w-[320px] shrink-0">
-                                            <TerminalLiquidityWall
-                                                coin={selectedToken}
-                                                currentPrice={currentPrice}
-                                                onPriceClick={(px) => setBookPrice(px.toString())}
-                                            />
-                                        </div>
+                                    <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto flex flex-col">
+                                        <OrderForm
+                                            symbol={selectedToken}
+                                            currentPrice={currentPrice}
+                                            isAuthenticated={isAuthenticated}
+                                            token={token}
+                                            walletBalance={walletBalance}
+                                            agent={agent}
+                                            isAgentActive={isAgentActive}
+                                            onEnableAgent={enableSession}
+                                            onLogin={() => login('google')}
+                                            onDeposit={() => setShowDeposit(true)}
+                                            selectedPrice={bookPrice}
+                                            selectedSize={bookSize}
+                                            error={error || undefined}
+                                        />
                                     </div>
-                                ) : activeTab === 'cohorts' ? (
-                                    <CohortSentiment symbol={selectedToken} />
-                                ) : activeTab === 'news' ? (
-                                    <NewsFeed symbol={selectedToken} aiBias={aiBias} />
-                                ) : (
-                                    <LiquidationFirehose />
-                                )}
+                                </div>
                             </div>
-                        </div>
+
+                            <div className="flex bg-gray-950 border-t border-white/10 p-1 shrink-0 h-12">
+                                <button onClick={() => setMobileTab('chart')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'chart' ? 'text-blue-500 bg-blue-500/10' : 'text-gray-500'}`}>
+                                    <BarChart3 className="w-4 h-4" />
+                                    <span className="text-[8px] font-black uppercase">Chart</span>
+                                </button>
+                                <button onClick={() => setMobileTab('book')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'book' ? 'text-purple-500 bg-purple-500/10' : 'text-gray-500'}`}>
+                                    <RefreshCw className="w-4 h-4" />
+                                    <span className="text-[8px] font-black uppercase">Book</span>
+                                </button>
+                                <button onClick={() => setMobileTab('order')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'order' ? 'text-emerald-500 bg-emerald-500/10' : 'text-gray-500'}`}>
+                                    <Zap className="w-4 h-4" />
+                                    <span className="text-[8px] font-black uppercase">Trade</span>
+                                </button>
+                                <button onClick={() => setMobileTab('intel')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'intel' ? 'text-amber-500 bg-amber-500/10' : 'text-gray-500'}`}>
+                                    <Sparkles className="w-4 h-4" />
+                                    <span className="text-[8px] font-black uppercase">Intel</span>
+                                </button>
+                            </div>
+
+                            <div className={`flex flex-col flex-1 min-h-0 w-full bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden ${mobileTab === 'intel' ? 'flex' : 'hidden'}`}>
+                                <div className="flex-1 overflow-hidden">
+                                    <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
+                                </div>
+                            </div>
+                        </Suspense>
                     </div>
                 </div>
 
-                <InsiderIntelligence coin={selectedToken} />
+                <Suspense fallback={null}>
+                    <InsiderIntelligence coin={selectedToken} />
+                </Suspense>
 
-                {/* Footer Status Bar */}
-                <StatusBar
-                    isWsConnected={isWsConnected}
-                    tokens={tokens}
-                    onOpenCommandPalette={() => setShowCommandPalette(true)}
-                />
+                <StatusBar isWsConnected={isWsConnected} tokens={tokens} isAgentActive={isAgentActive} onOpenCommandPalette={() => setShowCommandPalette(true)} />
             </main>
 
-            {/* Command Palette Modal */}
-            <CommandPalette
-                tokens={tokens}
-                onSelectToken={(symbol) => {
-                    setSelectedToken(symbol);
-                    setAiPositionContext(null);
-                }}
-                isOpen={showCommandPalette}
-                onClose={() => setShowCommandPalette(false)}
-            />
+            {/* Modals */}
+            <Suspense fallback={null}>
+                <CommandPalette
+                    tokens={tokens}
+                    onSelectToken={(symbol) => {
+                        setSelectedToken(symbol);
+                        setAiPositionContext(null);
+                    }}
+                    onExecuteCommand={(cmd) => {
+                        if (['des', 'arb', 'risk', 'debate'].includes(cmd)) {
+                            setActiveTab('pro');
+                        } else if (cmd === 'twap') {
+                            setActiveTab('twap');
+                        }
+                    }}
+                    isOpen={showCommandPalette}
+                    onClose={() => setShowCommandPalette(false)}
+                />
 
-            <AddWalletModal isOpen={showAdd} onClose={() => setShowAdd(false)} onSuccess={() => { }} />
-            <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onSuccess={() => { }} />
-            <DepositModal isOpen={showDeposit} onClose={() => setShowDeposit(false)} />
+                <AddWalletModal isOpen={showAdd} onClose={() => setShowAdd(false)} onSuccess={() => { }} />
+                <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onSuccess={() => { }} />
+                <DepositModal isOpen={showDeposit} onClose={() => setShowDeposit(false)} />
+                {showSettings && <TerminalSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />}
+                {showCloseModal && selectedPositionToClose && (
+                    <ClosePositionModal position={selectedPositionToClose} onClose={() => setShowCloseModal(false)} onConfirm={handleConfirmClose} />
+                )}
+            </Suspense>
         </div>
     );
 }

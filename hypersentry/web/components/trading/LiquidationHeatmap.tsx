@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
-import { Zap, TrendingUp, TrendingDown, Target, AlertTriangle, ZoomIn, ZoomOut, Move } from 'lucide-react';
+import { Zap, TrendingUp, TrendingDown, Target, AlertTriangle, ZoomIn, ZoomOut, Move, BarChart3, Flame } from 'lucide-react';
 import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
@@ -201,16 +201,22 @@ export default function LiquidationHeatmap({
                     <div className="flex bg-gray-900 rounded-lg p-0.5 border border-white/5">
                         <button
                             onClick={() => setViewMode('profile')}
-                            className={`px-2 py-1 text-[9px] font-bold uppercase rounded transition-all ${viewMode === 'profile' ? 'bg-[var(--color-accent-orange)]/20 text-[var(--color-accent-orange)]' : 'text-gray-500 hover:text-gray-300'
+                            className={`px-3 py-1 text-[9px] font-black uppercase rounded transition-all flex items-center gap-1.5 ${viewMode === 'profile'
+                                ? 'bg-orange-500 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]'
+                                : 'text-gray-500 hover:text-gray-300'
                                 }`}
                         >
+                            <BarChart3 className="w-3 h-3" />
                             Profile
                         </button>
                         <button
                             onClick={() => setViewMode('heatmap')}
-                            className={`px-2 py-1 text-[9px] font-bold uppercase rounded transition-all ${viewMode === 'heatmap' ? 'bg-[var(--color-accent-orange)]/20 text-[var(--color-accent-orange)]' : 'text-gray-500 hover:text-gray-300'
+                            className={`px-3 py-1 text-[9px] font-black uppercase rounded transition-all flex items-center gap-1.5 ${viewMode === 'heatmap'
+                                ? 'bg-orange-500 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]'
+                                : 'text-gray-500 hover:text-gray-300'
                                 }`}
                         >
+                            <Flame className="w-3 h-3" />
                             Heatmap
                         </button>
                     </div>
@@ -257,112 +263,146 @@ export default function LiquidationHeatmap({
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Main Chart Area */}
-                <div className="flex-1 relative py-4 px-2" style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}>
-                    {/* Current Price Line */}
-                    <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 z-20 flex items-center">
-                        <div className="flex-1 h-[2px] bg-gradient-to-r from-transparent via-[var(--color-primary)] to-transparent shadow-[0_0_20px_var(--color-primary-glow)]" />
-                        <div className="bg-[var(--color-primary)] px-3 py-1 rounded-lg text-[11px] font-mono font-black text-black shadow-lg shadow-[var(--color-primary)]/30">
-                            ${formatPrice(currentPrice)}
+                <div className="flex-1 relative py-4 px-2 overflow-hidden" style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}>
+
+                    {viewMode === 'heatmap' ? (
+                        <div className="absolute inset-0 p-4">
+                            <div className="relative w-full h-full border border-white/5 rounded-2xl overflow-hidden bg-black/40 shadow-inner group">
+                                <HeatmapCanvas
+                                    currentPrice={currentPrice}
+                                    symbol={symbol}
+                                    liqLevels={liqLevels}
+                                    zoomLevel={zoomLevel}
+                                    onPriceSelect={onPriceSelect}
+                                />
+
+                                {/* Professional Legend Overlay */}
+                                <div className="absolute bottom-4 left-4 flex flex-col gap-2 p-3 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl z-30">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                                        <span className="text-[10px] text-gray-300 font-black uppercase">Sell Liquidity</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
+                                        <span className="text-[10px] text-gray-300 font-black uppercase">Buy Liquidity</span>
+                                    </div>
+                                    <div className="w-full h-px bg-white/5 my-1" />
+                                    <div className="flex items-center gap-2">
+                                        <Zap className="w-3 h-3 text-orange-400" />
+                                        <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Resolving: 256 Levels</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-
-                    {/* Shorts Section (Above) */}
-                    <div className="absolute top-4 left-4 right-4 bottom-1/2 mb-4 flex flex-col justify-end gap-1.5 overflow-hidden">
-                        {shortLevels.slice(0, 7).reverse().map((level, i) => {
-                            const barWidth = (level.volume / maxVolume) * 90;
-                            const distFromSpot = ((level.price - currentPrice) / currentPrice * 100).toFixed(1);
-
-                            return (
-                                <div
-                                    key={`short-${i}`}
-                                    className="relative flex items-center group cursor-pointer transition-all duration-200 hover:scale-[1.01]"
-                                    onMouseEnter={() => setHoveredLevel(level)}
-                                    onMouseLeave={() => setHoveredLevel(null)}
-                                    onClick={() => handleLevelClick(level)}
-                                >
-                                    {/* Glow Background */}
-                                    <div
-                                        className="absolute inset-y-0 left-0 rounded-r-full bg-gradient-to-r from-[var(--color-bullish)]/0 via-[var(--color-bullish)]/20 to-[var(--color-bullish)]/40 blur-md"
-                                        style={{ width: `${barWidth}%` }}
-                                    />
-
-                                    {/* Main Bar */}
-                                    <div
-                                        className={`h-7 rounded-r-full relative flex items-center px-3 gap-2 transition-all duration-300 border-l-4 border-[var(--color-bullish)]
-                                            bg-gradient-to-r from-[var(--color-bullish)]/80 via-[var(--color-bullish)]/60 to-[var(--color-bullish)]/30
-                                            ${hoveredLevel === level ? 'shadow-[0_0_30px_var(--color-bullish)]/40 ring-1 ring-[var(--color-bullish)]' : ''}
-                                        `}
-                                        style={{ width: `${Math.max(barWidth, 20)}%`, opacity: 0.4 + level.intensity * 0.6 }}
-                                    >
-                                        <span className={`text-[8px] font-black px-1 py-0.5 rounded ${getRiskColor(level.riskLevel)}`}>
-                                            {level.leverage}
-                                        </span>
-                                        <span className="text-[10px] font-mono font-bold text-white">{formatK(level.volume)}</span>
-                                        <span className="text-[9px] text-teal-200/70 ml-auto font-mono">+{distFromSpot}%</span>
-                                    </div>
-
-                                    {/* Price Label */}
-                                    <div className="ml-2 text-[10px] font-mono text-[var(--color-bullish)]/80 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
-                                        ${formatPrice(level.price)}
-                                    </div>
-
-                                    {/* Pulse for high intensity */}
-                                    {level.intensity > 0.7 && (
-                                        <div className="absolute left-1 w-2 h-2 rounded-full bg-[var(--color-bullish)] animate-ping" />
-                                    )}
+                    ) : (
+                        <>
+                            {/* Current Price Line */}
+                            <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 z-20 flex items-center">
+                                <div className="flex-1 h-[2px] bg-gradient-to-r from-transparent via-[var(--color-primary)] to-transparent shadow-[0_0_20px_var(--color-primary-glow)]" />
+                                <div className="bg-[var(--color-primary)] px-3 py-1 rounded-lg text-[11px] font-mono font-black text-black shadow-lg shadow-[var(--color-primary)]/30">
+                                    ${formatPrice(currentPrice)}
                                 </div>
-                            );
-                        })}
-                    </div>
+                            </div>
 
-                    {/* Longs Section (Below) */}
-                    <div className="absolute top-1/2 mt-4 left-4 right-4 bottom-4 flex flex-col justify-start gap-1.5 overflow-hidden">
-                        {longLevels.slice(0, 7).map((level, i) => {
-                            const barWidth = (level.volume / maxVolume) * 90;
-                            const distFromSpot = ((currentPrice - level.price) / currentPrice * 100).toFixed(1);
+                            {/* Shorts Section (Above) */}
+                            <div className="absolute top-4 left-4 right-4 bottom-1/2 mb-4 flex flex-col justify-end gap-1.5 overflow-hidden">
+                                {shortLevels.slice(0, 7).reverse().map((level, i) => {
+                                    const barWidth = (level.volume / maxVolume) * 90;
+                                    const distFromSpot = ((level.price - currentPrice) / currentPrice * 100).toFixed(1);
 
-                            return (
-                                <div
-                                    key={`long-${i}`}
-                                    className="relative flex items-center group cursor-pointer transition-all duration-200 hover:scale-[1.01]"
-                                    onMouseEnter={() => setHoveredLevel(level)}
-                                    onMouseLeave={() => setHoveredLevel(null)}
-                                    onClick={() => handleLevelClick(level)}
-                                >
-                                    {/* Glow Background */}
-                                    <div
-                                        className="absolute inset-y-0 left-0 rounded-r-full bg-gradient-to-r from-[var(--color-bearish)]/0 via-[var(--color-bearish)]/20 to-[var(--color-bearish)]/40 blur-md"
-                                        style={{ width: `${barWidth}%` }}
-                                    />
+                                    return (
+                                        <div
+                                            key={`short-${i}`}
+                                            className="relative flex items-center group cursor-pointer transition-all duration-200 hover:scale-[1.01]"
+                                            onMouseEnter={() => setHoveredLevel(level)}
+                                            onMouseLeave={() => setHoveredLevel(null)}
+                                            onClick={() => handleLevelClick(level)}
+                                        >
+                                            {/* Glow Background */}
+                                            <div
+                                                className="absolute inset-y-0 left-0 rounded-r-full bg-gradient-to-r from-[var(--color-bullish)]/0 via-[var(--color-bullish)]/20 to-[var(--color-bullish)]/40 blur-md"
+                                                style={{ width: `${barWidth}%` }}
+                                            />
 
-                                    {/* Main Bar */}
-                                    <div
-                                        className={`h-7 rounded-r-full relative flex items-center px-3 gap-2 transition-all duration-300 border-l-4 border-[var(--color-bearish)]
-                                            bg-gradient-to-r from-[var(--color-bearish)]/80 via-[var(--color-bearish)]/60 to-[var(--color-bearish)]/30
-                                            ${hoveredLevel === level ? 'shadow-[0_0_30px_var(--color-bearish)]/40 ring-1 ring-[var(--color-bearish)]' : ''}
-                                        `}
-                                        style={{ width: `${Math.max(barWidth, 20)}%`, opacity: 0.4 + level.intensity * 0.6 }}
-                                    >
-                                        <span className={`text-[8px] font-black px-1 py-0.5 rounded ${getRiskColor(level.riskLevel)}`}>
-                                            {level.leverage}
-                                        </span>
-                                        <span className="text-[10px] font-mono font-bold text-white">{formatK(level.volume)}</span>
-                                        <span className="text-[9px] text-red-200/70 ml-auto font-mono">-{distFromSpot}%</span>
-                                    </div>
+                                            {/* Main Bar */}
+                                            <div
+                                                className={`h-7 rounded-r-full relative flex items-center px-3 gap-2 transition-all duration-300 border-l-4 border-[var(--color-bullish)]
+                                                    bg-gradient-to-r from-[var(--color-bullish)]/80 via-[var(--color-bullish)]/60 to-[var(--color-bullish)]/30
+                                                    ${hoveredLevel === level ? 'shadow-[0_0_30px_var(--color-bullish)]/40 ring-1 ring-[var(--color-bullish)]' : ''}
+                                                `}
+                                                style={{ width: `${Math.max(barWidth, 20)}%`, opacity: 0.4 + level.intensity * 0.6 }}
+                                            >
+                                                <span className={`text-[8px] font-black px-1 py-0.5 rounded ${getRiskColor(level.riskLevel)}`}>
+                                                    {level.leverage}
+                                                </span>
+                                                <span className="text-[10px] font-mono font-bold text-white">{formatK(level.volume)}</span>
+                                                <span className="text-[9px] text-teal-200/70 ml-auto font-mono">+{distFromSpot}%</span>
+                                            </div>
 
-                                    {/* Price Label */}
-                                    <div className="ml-2 text-[10px] font-mono text-[var(--color-bearish)]/80 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
-                                        ${formatPrice(level.price)}
-                                    </div>
+                                            {/* Price Label */}
+                                            <div className="ml-2 text-[10px] font-mono text-[var(--color-bullish)]/80 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                                                ${formatPrice(level.price)}
+                                            </div>
 
-                                    {/* Pulse for high intensity */}
-                                    {level.intensity > 0.7 && (
-                                        <div className="absolute left-1 w-2 h-2 rounded-full bg-[var(--color-bearish)] animate-ping" />
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
+                                            {/* Pulse for high intensity */}
+                                            {level.intensity > 0.7 && (
+                                                <div className="absolute left-1 w-2 h-2 rounded-full bg-[var(--color-bullish)] animate-ping" />
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Longs Section (Below) */}
+                            <div className="absolute top-1/2 mt-4 left-4 right-4 bottom-4 flex flex-col justify-start gap-1.5 overflow-hidden">
+                                {longLevels.slice(0, 7).map((level, i) => {
+                                    const barWidth = (level.volume / maxVolume) * 90;
+                                    const distFromSpot = ((currentPrice - level.price) / currentPrice * 100).toFixed(1);
+
+                                    return (
+                                        <div
+                                            key={`long-${i}`}
+                                            className="relative flex items-center group cursor-pointer transition-all duration-200 hover:scale-[1.01]"
+                                            onMouseEnter={() => setHoveredLevel(level)}
+                                            onMouseLeave={() => setHoveredLevel(null)}
+                                            onClick={() => handleLevelClick(level)}
+                                        >
+                                            {/* Glow Background */}
+                                            <div
+                                                className="absolute inset-y-0 left-0 rounded-r-full bg-gradient-to-r from-[var(--color-bearish)]/0 via-[var(--color-bearish)]/20 to-[var(--color-bearish)]/40 blur-md"
+                                                style={{ width: `${barWidth}%` }}
+                                            />
+
+                                            {/* Main Bar */}
+                                            <div
+                                                className={`h-7 rounded-r-full relative flex items-center px-3 gap-2 transition-all duration-300 border-l-4 border-[var(--color-bearish)]
+                                                    bg-gradient-to-r from-[var(--color-bearish)]/80 via-[var(--color-bearish)]/60 to-[var(--color-bearish)]/30
+                                                    ${hoveredLevel === level ? 'shadow-[0_0_30px_var(--color-bearish)]/40 ring-1 ring-[var(--color-bearish)]' : ''}
+                                                `}
+                                                style={{ width: `${Math.max(barWidth, 20)}%`, opacity: 0.4 + level.intensity * 0.6 }}
+                                            >
+                                                <span className={`text-[8px] font-black px-1 py-0.5 rounded ${getRiskColor(level.riskLevel)}`}>
+                                                    {level.leverage}
+                                                </span>
+                                                <span className="text-[10px] font-mono font-bold text-white">{formatK(level.volume)}</span>
+                                                <span className="text-[9px] text-red-200/70 ml-auto font-mono">-{distFromSpot}%</span>
+                                            </div>
+
+                                            {/* Price Label */}
+                                            <div className="ml-2 text-[10px] font-mono text-[var(--color-bearish)]/80 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                                                ${formatPrice(level.price)}
+                                            </div>
+
+                                            {/* Pulse for high intensity */}
+                                            {level.intensity > 0.7 && (
+                                                <div className="absolute left-1 w-2 h-2 rounded-full bg-[var(--color-bearish)] animate-ping" />
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 {/* Recent Liquidations Sidebar */}
@@ -447,5 +487,197 @@ export default function LiquidationHeatmap({
                 </div>
             </div>
         </div>
+    );
+}
+/**
+ * Advanced Heatmap Canvas Component
+ * Renders a high-fidelity liquidity depth map using Canvas 2D.
+ */
+function HeatmapCanvas({ currentPrice, liqLevels, zoomLevel, onPriceSelect }: any) {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    useEffect(() => {
+        if (!canvasRef.current || !currentPrice) return;
+
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+
+        // Failsafe for zero dimensions
+        const width = rect.width || 800;
+        const height = rect.height || 600;
+
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.scale(dpr, dpr);
+
+        const w = width;
+        const h = height;
+
+        // Clear canvas with deep space gradient
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, w, h);
+
+        // Draw Grid with higher visibility
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 0.5;
+
+        // Vertical grid lines (Time axis)
+        for (let x = 0; x <= w; x += w / 12) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+        }
+
+        // Horizontal grid lines (Price axis)
+        for (let y = 0; y <= h; y += h / 10) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+            ctx.stroke();
+        }
+
+        // If no levels, show scanning status
+        if (liqLevels.length === 0) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.font = 'bold 12px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText('SCANNING FOR LIQUIDITY CLUSTERS...', w / 2, h / 2 - 20);
+            return;
+        }
+
+        // Identify Top 3 Critical Clusters (Dominant Gravity Wells)
+        const sortedClusters = [...liqLevels].sort((a, b) => b.intensity - a.intensity);
+        const topClusters = sortedClusters.slice(0, 3);
+
+        // Draw Heatmap Data
+        liqLevels.forEach((level: any) => {
+            const yOffset = ((level.price - currentPrice) / currentPrice) * h * 5;
+            const y = h / 2 - yOffset;
+            if (y < -100 || y > h + 100) return;
+
+            const isKey = topClusters.some(c => c.price === level.price);
+            const baseColor = level.side === 'short' ? '16, 185, 129' : '239, 68, 68';
+
+            // Generate dense "Gravity Wells"
+            for (let col = 0; col < 12; col++) {
+                const x = (w * 0.05) + (col * (w * 0.08));
+                // Amplify key clusters
+                const intensityScale = isKey ? level.intensity * 1.4 : level.intensity;
+                const size = (25 + intensityScale * 65) * zoomLevel;
+                const glowSize = size * 1.8;
+
+                const op = (0.12 + intensityScale * 0.45) * (1 - (col / 15));
+
+                const grad = ctx.createRadialGradient(x, y, 0, x, y, glowSize);
+                grad.addColorStop(0, `rgba(${baseColor}, ${op})`);
+                grad.addColorStop(0.5, `rgba(${baseColor}, ${op * 0.3})`);
+                grad.addColorStop(1, `rgba(${baseColor}, 0)`);
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(x, y, glowSize, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (col === 0) {
+                    // Central Power Core
+                    ctx.fillStyle = `rgba(${baseColor}, ${0.5 + intensityScale * 0.4})`;
+                    ctx.beginPath();
+                    ctx.arc(x, y, size / 6, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Key Cluster Tactical UI
+                    if (isKey) {
+                        ctx.strokeStyle = `rgba(${baseColor}, 0.6)`;
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([2, 4]);
+                        ctx.beginPath();
+                        ctx.moveTo(x + 40, y);
+                        ctx.lineTo(w - 90, y);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+
+                        // Floating Intelligence Label
+                        ctx.fillStyle = `rgba(${baseColor}, 1)`;
+                        ctx.font = '900 8px monospace';
+                        ctx.textAlign = 'left';
+                        ctx.fillText(`KEY ${level.side.toUpperCase()} LIQ CLUSTER`, x + 25, y - 8);
+                        ctx.fillText(`${(level.intensity * 100).toFixed(0)}% STRENGTH`, x + 25, y + 14);
+
+                        // Small icon-like dot
+                        ctx.beginPath();
+                        ctx.arc(x + 18, y + 2, 2.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+        });
+
+        // Price Labels on right axis
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'right';
+
+        const pricePoints = [1.05, 1.025, 1, 0.975, 0.95];
+        pricePoints.forEach(p => {
+            const px = currentPrice * p;
+            const y = h / 2 - ((px - currentPrice) / currentPrice) * h * 5;
+            if (y > 10 && y < h - 10) {
+                ctx.fillText(`$${px.toLocaleString(undefined, { minimumFractionDigits: 1 })}`, w - 10, y + 4);
+
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.beginPath();
+                ctx.moveTo(w - 70, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
+        });
+
+        // Current Price Highlight Line
+        ctx.strokeStyle = 'rgba(249, 115, 22, 0.8)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(0, h / 2);
+        ctx.lineTo(w - 80, h / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label for current price
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(w - 85, h / 2 - 12, 85, 24, 4);
+        } else {
+            ctx.fillRect(w - 85, h / 2 - 12, 85, 24);
+        }
+        ctx.fill();
+
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`$${currentPrice.toLocaleString()}`, w - 42, h / 2 + 4);
+
+    }, [currentPrice, liqLevels, zoomLevel]);
+
+    return (
+        <canvas
+            ref={canvasRef}
+            className="w-full h-full cursor-crosshair transition-opacity duration-500"
+            onClick={(e) => {
+                const rect = canvasRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                const clickY = e.clientY - rect.top;
+                const h = rect.height;
+                // Reverse calculate price from Y
+                // y = h/2 - ((p - currentPrice) / currentPrice) * h * 5
+                const price = currentPrice * (1 + (h / 2 - clickY) / (h * 5));
+                if (onPriceSelect) onPriceSelect(price.toFixed(2));
+            }}
+        />
     );
 }

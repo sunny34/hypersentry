@@ -18,6 +18,7 @@ import {
     BarChart3
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useHyperliquidSession } from '@/hooks/useHyperliquidSession';
 import { useState } from 'react';
 import axios from 'axios';
 import { useRouter, usePathname } from 'next/navigation';
@@ -37,6 +38,7 @@ interface SidebarProps {
 export default function Sidebar({ view, setView, onImport, onAdd, currentView, onViewChange, isMobileOpen = false, onMobileClose }: SidebarProps) {
     const { user, isAuthenticated, logout, isLoading, token } = useAuth();
     const { isCollapsed, toggle } = useSidebar();
+    const { isAgentActive } = useHyperliquidSession();
     const [showTelegram, setShowTelegram] = useState(false);
     const [chatId, setChatId] = useState('');
     const router = useRouter();
@@ -110,7 +112,7 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
                 {/* Brand */}
                 <div className={`p-6 border-b border-[var(--glass-border)] flex items-center justify-between transition-all shrink-0`}>
                     <div className={`flex items-center gap-3 ${isCollapsed ? 'lg:justify-center lg:w-full' : ''}`}>
-                        <div className="w-8 h-8 bg-[var(--color-primary)] rounded-full flex items-center justify-center animate-pulse shrink-0">
+                        <div className="w-8 h-8 bg-[var(--color-primary)] rounded-full flex items-center justify-center shrink-0">
                             <Zap className="text-black w-5 h-5" />
                         </div>
                         {(!isCollapsed || isMobileOpen) && <h1 className="text-lg font-bold tracking-tight whitespace-nowrap block lg:group-hover:block text-[var(--foreground)]">
@@ -158,7 +160,12 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
                         className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'terminal' ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-gray-400 hover:bg-white/5 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
                         title={isCollapsed ? "Trading Terminal" : ""}
                     >
-                        <BarChart3 className="w-5 h-5 shrink-0" />
+                        <div className="relative">
+                            <BarChart3 className="w-5 h-5 shrink-0" />
+                            {isAgentActive && (
+                                <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full border border-[var(--background)] shadow-[0_0_5px_rgba(52,211,153,0.5)]" />
+                            )}
+                        </div>
                         {!isCollapsed && <span className="font-medium whitespace-nowrap">Trading Terminal</span>}
                     </button>
 
@@ -180,22 +187,34 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
                         {!isCollapsed && <span className="font-medium whitespace-nowrap">Strategies</span>}
                     </button>
 
+                    {!isCollapsed && <p className="text-xs font-bold text-gray-500 uppercase px-4 mt-6 mb-2">Pro Suite</p>}
+
                     <button
                         onClick={() => handleViewChange('arb')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'arb' ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-gray-400 hover:bg-white/5 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'arb' ? 'bg-emerald-500/10 text-emerald-400' : 'text-gray-400 hover:bg-white/5 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
                         title={isCollapsed ? "Arb Scanner" : ""}
                     >
                         <Globe className="w-5 h-5 shrink-0" />
-                        {!isCollapsed && <span className="font-medium whitespace-nowrap">Arb Scanner</span>}
+                        {!isCollapsed && (
+                            <div className="flex items-center justify-between flex-1">
+                                <span className="font-medium whitespace-nowrap">Arb Scanner</span>
+                                <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded font-black tracking-widest">PRO</span>
+                            </div>
+                        )}
                     </button>
 
                     <button
                         onClick={() => handleViewChange('risk')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'risk' ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-gray-400 hover:bg-white/5 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'risk' ? 'bg-emerald-500/10 text-emerald-400' : 'text-gray-400 hover:bg-white/5 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
                         title={isCollapsed ? "Risk Simulator" : ""}
                     >
                         <Zap className="w-5 h-5 shrink-0" />
-                        {!isCollapsed && <span className="font-medium whitespace-nowrap">Risk Simulator</span>}
+                        {!isCollapsed && (
+                            <div className="flex items-center justify-between flex-1">
+                                <span className="font-medium whitespace-nowrap">Risk Simulator</span>
+                                <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded font-black tracking-widest">PRO</span>
+                            </div>
+                        )}
                     </button>
                     <button
                         onClick={() => handleViewChange('settings')}

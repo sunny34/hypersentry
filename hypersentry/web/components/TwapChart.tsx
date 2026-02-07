@@ -46,8 +46,8 @@ export default function TwapChart({ token, apiUrl, authToken }: TwapChartProps) 
                 const result = await response.json();
                 setData(result.data || []);
                 setError(null);
-            } catch (err) {
-                console.error('Error fetching TWAP history:', err);
+            } catch {
+                // Silently handle errors - set error state for UI
                 setError('Failed to load chart data');
             } finally {
                 setLoading(false);
@@ -115,8 +115,8 @@ export default function TwapChart({ token, apiUrl, authToken }: TwapChartProps) 
                     <h3 className="text-lg font-bold text-white">{token} TWAP Delta</h3>
                     {data.length > 0 && (
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${latestDelta >= 0
-                                ? 'bg-emerald-500/20 text-emerald-400'
-                                : 'bg-red-500/20 text-red-400'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : 'bg-red-500/20 text-red-400'
                             }`}>
                             {latestDelta >= 0 ? '↑ Bullish' : '↓ Bearish'}
                         </span>
@@ -130,8 +130,8 @@ export default function TwapChart({ token, apiUrl, authToken }: TwapChartProps) 
                             key={range}
                             onClick={() => setTimeRange(range)}
                             className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${timeRange === range
-                                    ? 'bg-gray-700 text-white'
-                                    : 'text-gray-400 hover:text-white'
+                                ? 'bg-gray-700 text-white'
+                                : 'text-gray-400 hover:text-white'
                                 }`}
                         >
                             {range === 'all' ? 'All' : range.toUpperCase()}

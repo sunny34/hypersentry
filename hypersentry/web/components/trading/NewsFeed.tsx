@@ -3,6 +3,10 @@ import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Newspaper, ExternalLink, RefreshCw, Clock, Zap, TrendingUp, TrendingDown, AlertTriangle, Shield, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Twitter, Send, Globe, MessageSquare } from 'lucide-react';
+import { useWebSocket } from '@/hooks/useWebSocket';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 /**
  * Interface representing a processed news item with intelligence scoring.
@@ -22,6 +26,8 @@ interface NewsItem {
 interface NewsFeedProps {
     /** The token symbol to fetch news for (e.g., 'BTC', 'ETH') */
     symbol: string;
+    /** All tokens for real-time anomaly detection */
+    tokens?: any[];
     /** Current AI Bias from Gemini analysis */
     aiBias?: 'bullish' | 'bearish' | 'neutral';
     /** Optional callback fired when a major news item is detected */
@@ -35,14 +41,20 @@ interface NewsFeedProps {
  * sentiment using internal heuristics, and provides actionable trading signals.
  * Supports "Auto-Pilot" mode for automated trade execution on high-conviction events.
  */
-export default function NewsFeed({ symbol, aiBias = 'neutral', onMajorNews }: NewsFeedProps) {
+export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMajorNews }: NewsFeedProps) {
     const [news, setNews] = useState<NewsItem[]>([]);
+    const [anomalyAlerts, setAnomalyAlerts] = useState<NewsItem[]>([]);
+    const [density, setDensity] = useState<'compact' | 'standard' | 'relaxed'>('compact');
     const [isLoading, setIsLoading] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [autoPilot, setAutoPilot] = useState(false);
     const [guardianActive, setGuardianActive] = useState(true);
     const [globalSentiment, setGlobalSentiment] = useState<{ positive: number, negative: number, neutral: number }>({ positive: 0, negative: 0, neutral: 0 });
     const lastNewsUrlRef = useRef<string | null>(null);
+    const prevTokensRef = useRef<any[]>([]);
+
+    const wsUrl = API_URL.replace('http', 'ws') + '/ws';
+    const { lastMessage } = useWebSocket(wsUrl);
 
     const POLLING_INTERVAL_MS = 25000; // 25 seconds for Alpha Polling
 
@@ -54,6 +66,28 @@ export default function NewsFeed({ symbol, aiBias = 'neutral', onMajorNews }: Ne
         if (news.length === 0) setIsLoading(true);
 
         try {
+            // 1. Fetch from our backend (Aggregated Twitter, Telegram, RSS)
+            let backendIntel: NewsItem[] = [];
+            try {
+                const backendRes = await axios.get(`${API_URL}/intel/latest`);
+                if (Array.isArray(backendRes.data)) {
+                    backendIntel = backendRes.data.map((item: any) => ({
+                        id: item.id || `intel-${Math.random()}`,
+                        title: item.title,
+                        url: item.url,
+                        source: item.source || 'Intel',
+                        published: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        sentiment: item.sentiment || 'neutral',
+                        reco: item.sentiment === 'positive' ? 'long' : item.sentiment === 'negative' ? 'short' : 'neutral',
+                        confidence: item.confidence || 50,
+                        isHighImpact: item.isHighImpact || false
+                    }));
+                }
+            } catch (e) {
+                console.warn("Backend Intel unreachable, falling back to public feeds");
+            }
+
+            // 2. Fetch from CryptoCompare as fallback/supplement
             const res = await axios.get(
                 `https://min-api.cryptocompare.com/data/v2/news/?categories=${symbol},Blockchain,Exchange,Market,Regulatory&excludeCategories=Sponsored`
             );
@@ -141,9 +175,13 @@ export default function NewsFeed({ symbol, aiBias = 'neutral', onMajorNews }: Ne
             }
 
             setGlobalSentiment({ positive: posCount, negative: negCount, neutral: neutCount });
-            setNews(items);
-        } catch (e) {
-            console.error('Terminal: News fetch failed:', e);
+
+            // Combine and sort by "published" time (hacky since its a string, but items are already somewhat sorted)
+            // Ideally we'd have real timestamps
+            const allItems = [...backendIntel, ...items].slice(0, 30);
+            setNews(allItems);
+        } catch {
+            // Silently handle - use demo news
             setNews(getDemoNews(symbol));
         } finally {
             setIsLoading(false);
@@ -151,11 +189,96 @@ export default function NewsFeed({ symbol, aiBias = 'neutral', onMajorNews }: Ne
         }
     };
 
+    // WebSocket News Handler
+    useEffect(() => {
+        if (lastMessage?.type === 'intel_alpha' && Array.isArray(lastMessage.data)) {
+            const incomingItems: NewsItem[] = lastMessage.data.map((item: any) => ({
+                id: item.id || `ws-${Math.random()}`,
+                title: item.title,
+                url: item.url,
+                source: item.source || 'Intel',
+                published: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                sentiment: item.sentiment || 'neutral',
+                reco: item.sentiment === 'positive' ? 'long' : item.sentiment === 'negative' ? 'short' : 'neutral',
+                confidence: item.confidence || 50,
+                isHighImpact: item.isHighImpact || false
+            }));
+
+            setNews(prev => {
+                const combined = [...incomingItems, ...prev];
+                // Remove duplicates by ID
+                const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+                return unique.slice(0, 50);
+            });
+
+            // Trigger Major News for high impact items
+            const highImpact = incomingItems.find(i => i.isHighImpact);
+            if (highImpact && onMajorNews) {
+                onMajorNews(highImpact);
+            }
+        }
+    }, [lastMessage, onMajorNews]);
+
     useEffect(() => {
         fetchNews();
         const interval = setInterval(fetchNews, POLLING_INTERVAL_MS);
         return () => clearInterval(interval);
     }, [symbol, autoPilot]);
+
+    // REAL-TIME ANOMALY DETECTION ENGINE
+    useEffect(() => {
+        if (!tokens.length || !symbol) return;
+
+        const currentToken = tokens.find((t: any) => t.symbol === symbol);
+        const prevToken = prevTokensRef.current.find((t: any) => t.symbol === symbol);
+
+        if (currentToken && prevToken) {
+            const priceChange = ((currentToken.price - prevToken.price) / prevToken.price) * 100;
+            const volumeChange = currentToken.volume24h - prevToken.volume24h;
+
+            let anomaly: NewsItem | null = null;
+
+            // 1. Sudden Price Spike/Dump (> 0.5% in 5-10s polling)
+            if (Math.abs(priceChange) > 0.4) {
+                anomaly = {
+                    id: `price-alert-${Date.now()}`,
+                    title: `Intelligence Alert: ${symbol} ${priceChange > 0 ? 'Surging' : 'Dumping'} ${Math.abs(priceChange).toFixed(2)}% in seconds`,
+                    url: '#',
+                    source: 'System Monitor',
+                    published: 'NOW',
+                    sentiment: priceChange > 0 ? 'positive' : 'negative',
+                    reco: priceChange > 0 ? 'long' : 'short',
+                    confidence: 95,
+                    isHighImpact: true
+                };
+            }
+
+            // 2. Volume Anomaly (Sudden spike in 24h volume tracking)
+            const avgVol = tokens.reduce((acc: number, t: any) => acc + t.volume24h, 0) / tokens.length;
+            if (volumeChange > avgVol * 0.05) { // If volume grows by 5% of total avg in 5s
+                anomaly = {
+                    id: `vol-alert-${Date.now()}`,
+                    title: `Whale Alert: Unusual Volume Spike on ${symbol} (+${(volumeChange / 1000).toFixed(1)}k USD)`,
+                    url: '#',
+                    source: 'Liquidity Scanner',
+                    published: 'NOW',
+                    sentiment: 'positive',
+                    reco: 'neutral',
+                    confidence: 88,
+                    isHighImpact: true
+                };
+            }
+
+            if (anomaly) {
+                setAnomalyAlerts(prev => [anomaly!, ...prev].slice(0, 5));
+
+                // Audio or Visual Feedback could be added here
+                if (onMajorNews) onMajorNews(anomaly);
+            }
+        }
+
+        prevTokensRef.current = tokens;
+    }, [tokens, symbol]);
 
     /**
      * Manually triggers a trade execution based on a specific news item.
@@ -193,6 +316,24 @@ export default function NewsFeed({ symbol, aiBias = 'neutral', onMajorNews }: Ne
                 </div>
 
                 <div className="flex items-center gap-3">
+                    {/* Density Selector */}
+                    <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5">
+                        {[
+                            { id: 'compact', label: 'C', title: 'Compact View' },
+                            { id: 'standard', label: 'S', title: 'Standard View' },
+                            { id: 'relaxed', label: 'R', title: 'Relaxed View' }
+                        ].map((d) => (
+                            <button
+                                key={d.id}
+                                onClick={() => setDensity(d.id as any)}
+                                title={d.title}
+                                className={`w-5 h-5 flex items-center justify-center text-[8px] font-black rounded transition-all ${density === d.id ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                            >
+                                {d.label}
+                            </button>
+                        ))}
+                    </div>
+
                     {/* Guardian Selector */}
                     <button
                         onClick={() => setGuardianActive(!guardianActive)}
@@ -246,92 +387,112 @@ export default function NewsFeed({ symbol, aiBias = 'neutral', onMajorNews }: Ne
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-1 scrollbar-hide p-3 space-y-3">
+            <div className={`flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent hover:scrollbar-thumb-purple-500/30 transition-all ${density === 'compact' ? 'p-1.5 space-y-0.5' : density === 'standard' ? 'p-2.5 space-y-1.5' : 'p-4 space-y-3'}`}>
                 <AnimatePresence initial={false}>
+                    {/* Render Real-Time Anomalies first */}
+                    {anomalyAlerts.map((item) => (
+                        <motion.div
+                            key={item.id}
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className={`group relative rounded-lg bg-purple-500/10 border border-purple-500/30 overflow-hidden flex items-center justify-between gap-4 transition-all ${density === 'compact' ? 'px-2 py-1.5' : density === 'standard' ? 'px-3 py-2.5' : 'px-4 py-4 border-2'}`}
+                        >
+                            <div className="flex items-center gap-3 min-w-0">
+                                <div className="flex flex-col items-center">
+                                    <Zap className={`${density === 'compact' ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5'} text-purple-400 fill-current animate-pulse`} />
+                                    <span className="text-[6px] font-black text-purple-400">LIVE</span>
+                                </div>
+                                <div className="flex flex-col min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className={`${density === 'compact' ? 'text-[7px]' : 'text-[9px]'} font-black text-purple-400 uppercase tracking-tighter whitespace-nowrap`}>Market Anomaly</span>
+                                        <h4 className={`${density === 'compact' ? 'text-[10px]' : density === 'standard' ? 'text-[11px]' : 'text-[13px]'} font-bold text-white truncate leading-none`}>
+                                            {item.title}
+                                        </h4>
+                                    </div>
+                                    <span className="text-[7px] text-gray-400 font-bold uppercase tracking-widest mt-0.5">Confidence: {item.confidence}%</span>
+                                </div>
+                            </div>
+                            <span className="text-[8px] text-purple-400/60 font-black whitespace-nowrap shrink-0 uppercase tracking-tighter">Just Now</span>
+                        </motion.div>
+                    ))}
+
                     {news.map((item) => (
                         <motion.div
                             key={item.id}
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className={`group relative p-3.5 rounded-2xl bg-white/[0.02] border transition-all duration-300
-                                ${item.confidence > 70 ? 'border-purple-500/30 bg-purple-500/[0.03] shadow-[0_0_20px_rgba(168,85,247,0.05)]' : 'border-white/5 hover:bg-white/[0.04]'}`}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className={`group flex items-center justify-between gap-4 rounded-lg border transition-all duration-200
+                                ${density === 'compact' ? 'px-2 py-1' : density === 'standard' ? 'px-3 py-2' : 'px-4 py-3'}
+                                ${item.confidence > 75
+                                    ? 'border-purple-500/20 bg-purple-500/[0.03] hover:bg-purple-500/[0.06]'
+                                    : 'border-white/0 hover:border-white/5 hover:bg-white/[0.03]'}`}
                         >
-                            <div className="flex flex-col gap-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <div className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border shadow-sm
-                                            ${item.sentiment === 'positive' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                                                item.sentiment === 'negative' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
-                                                    'bg-gray-800/50 text-gray-500 border-white/5'}`}>
-                                            {item.sentiment}
-                                        </div>
-                                        {item.confidence > 70 && (
-                                            <div className="flex items-center gap-1 animate-pulse" title={`Confidence score based on keyword impact: ${item.confidence}%`}>
-                                                <Zap className="w-2.5 h-2.5 text-purple-400" />
-                                                <span className="text-[7px] font-black text-purple-400 uppercase tracking-widest">High Conviction</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                    <span className="text-[8px] text-gray-600 font-bold uppercase">{item.published}</span>
-                                </div>
+                            {/* Left: Metadata & Headline */}
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                                <div className={`${density === 'compact' ? 'w-1 h-2' : 'w-1 h-3'} rounded-full shrink-0 ${item.sentiment === 'positive' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]' :
+                                    item.sentiment === 'negative' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.3)]' :
+                                        'bg-gray-700'
+                                    }`} />
 
-                                <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className={`${density === 'compact' ? 'text-[7px]' : 'text-[8px]'} text-gray-500 font-mono font-bold shrink-0 uppercase`}>{item.published}</span>
                                     <a
                                         href={item.url}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-[12px] font-bold text-gray-200 leading-snug hover:text-purple-400 hover:underline transition line-clamp-2 decoration-purple-500/50 underline-offset-4"
+                                        className={`${density === 'compact' ? 'text-[10px]' : density === 'standard' ? 'text-[11px]' : 'text-[12px]'} font-semibold text-gray-300 truncate hover:text-purple-400 transition`}
                                     >
                                         {item.title}
                                     </a>
-                                    <span className="text-[7px] text-gray-400 font-bold uppercase tracking-widest opacity-60">Source: {item.source}</span>
                                 </div>
+                            </div>
 
-                                <div className="flex items-center justify-between pt-1">
-                                    <div className="flex items-center gap-2">
-                                        {item.sentiment === 'neutral' ? (
-                                            <div className="flex items-center gap-1.5 text-[8px] text-gray-500 font-bold uppercase italic">
-                                                <AlertTriangle className="w-2.5 h-2.5" />
-                                                Mixed Signals
-                                            </div>
-                                        ) : (
-                                            <div className={`flex items-center gap-1.5 text-[8px] font-black uppercase tracking-tighter
-                                                 ${item.reco === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                {item.reco === 'long' ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
-                                                Suggestion: {item.reco}
-                                            </div>
-                                        )}
-                                    </div>
+                            {/* Center: Source Tag (Hide on smaller width) */}
+                            <div className="hidden md:flex items-center gap-1.5 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
+                                {item.source.toLowerCase().includes('twitter') ? <Twitter className="w-2.5 h-2.5 text-blue-400" /> :
+                                    item.source.toLowerCase().includes('telegram') ? <Send className="w-2.5 h-2.5 text-blue-500" /> :
+                                        <Globe className="w-2.5 h-2.5 text-gray-500" />}
+                                <span className="text-[7px] text-gray-400 font-black uppercase tracking-widest">{item.source}</span>
+                            </div>
 
-                                    {item.reco !== 'neutral' && (
+                            {/* Right: Action / Recommendation */}
+                            <div className="flex items-center gap-3 shrink-0">
+                                {item.reco !== 'neutral' ? (
+                                    <div className="relative overflow-hidden">
+                                        {/* Dynamic Suggestion (Default) */}
+                                        <div className={`flex items-center gap-1 py-0.5 px-2 rounded border group-hover:opacity-0 transition-opacity ${item.reco === 'long' ? 'text-emerald-400 border-emerald-500/20' : 'text-red-400 border-red-500/20'
+                                            }`}>
+                                            <span className="text-[8px] font-black uppercase tracking-tighter">{item.reco}</span>
+                                        </div>
+
+                                        {/* Execute Button (Hover Only) */}
                                         <button
                                             onClick={(e) => {
                                                 e.preventDefault();
                                                 e.stopPropagation();
                                                 handleQuickTrade(item);
                                             }}
-                                            className={`relative z-30 flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-tighter transition-all hover:scale-[1.05] active:scale-95 shadow-lg active:shadow-inner
+                                            className={`absolute inset-0 z-10 flex items-center justify-center gap-1.5 rounded opacity-0 group-hover:opacity-100 transition-all scale-95 group-hover:scale-100 font-black text-[8px] uppercase tracking-tighter
                                                 ${item.reco === 'long'
-                                                    ? 'bg-emerald-500 text-black shadow-emerald-500/20 hover:bg-emerald-400'
-                                                    : 'bg-red-500 text-black shadow-red-500/20 hover:bg-red-400'}`}
+                                                    ? 'bg-emerald-500 text-black'
+                                                    : 'bg-red-500 text-black'}`}
                                         >
                                             <Zap className="w-2.5 h-2.5 fill-current" />
-                                            Execute {item.reco}
+                                            TRADE
                                         </button>
-                                    )}
-                                </div>
+                                    </div>
+                                ) : (
+                                    <div className="w-12 h-px bg-white/5" />
+                                )}
                             </div>
                         </motion.div>
                     ))}
                 </AnimatePresence>
 
                 {isLoading && (
-                    <div className="h-full flex flex-col items-center justify-center py-20 space-y-4">
-                        <div className="relative">
-                            <RefreshCw className="w-8 h-8 animate-spin text-purple-500/40" />
-                            <div className="absolute inset-0 bg-purple-500 blur-2xl opacity-10 animate-pulse" />
-                        </div>
-                        <span className="text-[9px] font-black uppercase tracking-widest text-gray-600">Syncing Intelligence...</span>
+                    <div className="flex flex-col items-center justify-center py-6 gap-2">
+                        <RefreshCw className="w-4 h-4 animate-spin text-purple-500/40" />
+                        <span className="text-[7px] font-black uppercase tracking-widest text-gray-600">Syncing Intelligence...</span>
                     </div>
                 )}
             </div>

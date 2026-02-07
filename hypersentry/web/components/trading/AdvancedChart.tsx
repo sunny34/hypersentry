@@ -365,8 +365,8 @@ function AdvancedChart({
             window.removeEventListener('resize', handleResize);
             try {
                 chart.remove();
-            } catch (e) {
-                console.error("Error removing chart:", e);
+            } catch {
+                // Silent cleanup - chart removal may fail if already destroyed
             }
             chartRef.current = null;
             candlestickSeriesRef.current = null;
@@ -457,8 +457,8 @@ function AdvancedChart({
                         });
                     }
                 }
-            } catch (err) {
-                console.error("Fetch Error:", err);
+            } catch {
+                // Silently handle - data unavailable
                 setError("Data unavailable");
             } finally {
                 if (isActive) setIsLoading(false);

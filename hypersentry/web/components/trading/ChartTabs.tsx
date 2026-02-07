@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 // Dynamically import chart components to prevent SSR issues
 const AdvancedChart = dynamic(() => import('./AdvancedChart'), { ssr: false });
 const LiquidationHeatmap = dynamic(() => import('./LiquidationHeatmap'), { ssr: false });
+const StopClusters = dynamic(() => import('./StopClusters'), { ssr: false });
 
 interface ChartTabsProps {
     symbol: string;
@@ -133,17 +134,11 @@ function ChartTabs({
                 )}
 
                 {activeView === 'stops' && (
-                    <div className="w-full h-full flex items-center justify-center bg-black/40">
-                        <div className="text-center">
-                            <ShieldAlert className="w-12 h-12 text-blue-400/50 mx-auto mb-4" />
-                            <h3 className="text-white font-bold mb-2">Stop Order Clusters</h3>
-                            <p className="text-gray-500 text-sm max-w-sm">
-                                Visualizes clusters of stop-loss and stop-limit orders based on on-chain data.
-                                <br />
-                                <span className="text-blue-400 text-xs mt-2 block">Coming Soon</span>
-                            </p>
-                        </div>
-                    </div>
+                    <StopClusters
+                        symbol={symbol}
+                        currentPrice={currentPrice}
+                        onPriceSelect={onPriceSelect}
+                    />
                 )}
             </div>
         </div>

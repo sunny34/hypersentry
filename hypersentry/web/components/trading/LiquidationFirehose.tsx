@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useHyperliquidWS } from '@/hooks/useHyperliquidWS';
-import { Skull, TrendingDown, TrendingUp, Zap } from 'lucide-react';
+import { Skull, TrendingDown, TrendingUp, Zap, Activity, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface Liquidation {
@@ -17,6 +17,31 @@ export default function LiquidationFirehose() {
     const { liquidations, status } = useHyperliquidWS();
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    // Aggregate stats
+    const stats = useMemo(() => {
+        let longLiqs = 0, shortLiqs = 0, totalValue = 0;
+        const coins = new Set<string>();
+
+        liquidations.forEach((liq) => {
+            const val = parseFloat(liq.sz) * parseFloat(liq.px);
+            totalValue += val;
+            coins.add(liq.coin);
+            if (liq.side === 'S') longLiqs++;
+            else shortLiqs++;
+        });
+
+        // Market stress = liquidations per minute (approx)
+        const stressLevel = liquidations.length > 10 ? 'HIGH' : liquidations.length > 5 ? 'MODERATE' : 'LOW';
+
+        return {
+            longLiqs,
+            shortLiqs,
+            totalValue,
+            coinsAffected: coins.size,
+            stressLevel
+        };
+    }, [liquidations]);
+
     const formatValue = (liq: Liquidation) => {
         const val = parseFloat(liq.sz) * parseFloat(liq.px);
         if (val >= 1000000) return `${(val / 1000000).toFixed(2)}M`;
@@ -24,18 +49,10 @@ export default function LiquidationFirehose() {
         return val.toFixed(0);
     };
 
-    // Helper for manual verification
-    const triggerMock = () => {
-        console.log("Triggering manual mock...");
-        window.dispatchEvent(new CustomEvent('mock-liquidation', {
-            detail: {
-                coin: 'BTC',
-                side: 'S',
-                sz: '1.5',
-                px: '73000',
-                time: Date.now()
-            }
-        }));
+    const formatDollar = (val: number) => {
+        if (val >= 1000000) return `$${(val / 1000000).toFixed(2)}M`;
+        if (val >= 1000) return `$${(val / 1000).toFixed(0)}K`;
+        return `$${val.toFixed(0)}`;
     };
 
     return (
@@ -46,22 +63,40 @@ export default function LiquidationFirehose() {
                         <Skull className="w-5 h-5 text-[var(--color-bearish)]" />
                         <div className="absolute inset-0 bg-[var(--color-bearish)] blur-lg opacity-20 animate-pulse" />
                     </div>
-                    <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white/80">Liquidation Firehose</span>
+                    <div className="flex flex-col">
+                        <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white/80">Global Liquidation Feed</span>
+                        <span className="text-[8px] text-gray-500 font-mono">All Markets • Real-time</span>
+                    </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    <button
-                        onClick={triggerMock}
-                        className="p-1 rounded-full hover:bg-white/5 transition-colors group"
-                        title="Simulate Event"
-                    >
-                        <Zap className="w-3 h-3 text-gray-600 group-hover:text-[var(--color-primary)] transition-colors" />
-                    </button>
                     <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--background)]/40 border border-[var(--glass-border)]">
                         <div className={`w-1.5 h-1.5 rounded-full ${status === 'connected' ? 'bg-[var(--color-bullish)] shadow-[0_0_8px_var(--color-bullish)] animate-pulse' : 'bg-[var(--color-bearish)] shadow-[0_0_8px_var(--color-bearish)]'}`} />
                         <span className="text-[8px] font-black text-gray-400 uppercase tracking-tighter">
                             {status === 'connected' ? 'Live' : 'Syncing'}
                         </span>
                     </div>
+                </div>
+            </div>
+
+            {/* Aggregate Stats Bar */}
+            <div className="px-3 py-2 bg-black/40 border-b border-[var(--glass-border)] grid grid-cols-4 gap-2">
+                <div className="flex flex-col items-center">
+                    <span className="text-[8px] text-gray-500 font-bold uppercase">Session Total</span>
+                    <span className="text-[11px] font-black text-white font-mono">{formatDollar(stats.totalValue)}</span>
+                </div>
+                <div className="flex flex-col items-center border-l border-white/5">
+                    <span className="text-[8px] text-gray-500 font-bold uppercase">Long REKT</span>
+                    <span className="text-[11px] font-black text-[var(--color-bearish)] font-mono">{stats.longLiqs}</span>
+                </div>
+                <div className="flex flex-col items-center border-l border-white/5">
+                    <span className="text-[8px] text-gray-500 font-bold uppercase">Short REKT</span>
+                    <span className="text-[11px] font-black text-[var(--color-bullish)] font-mono">{stats.shortLiqs}</span>
+                </div>
+                <div className="flex flex-col items-center border-l border-white/5">
+                    <span className="text-[8px] text-gray-500 font-bold uppercase">Stress</span>
+                    <span className={`text-[10px] font-black uppercase ${stats.stressLevel === 'HIGH' ? 'text-[var(--color-bearish)] animate-pulse' :
+                            stats.stressLevel === 'MODERATE' ? 'text-[var(--color-accent-orange)]' : 'text-gray-400'
+                        }`}>{stats.stressLevel}</span>
                 </div>
             </div>
 

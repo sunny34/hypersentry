@@ -7,8 +7,7 @@ import { TrendingUp, TrendingDown, Loader2, AlertCircle, ChevronDown, Settings, 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 // Types
-type OrderType = 'market' | 'limit';
-type ProOrderType = 'none' | 'scale' | 'twap' | 'stop_limit' | 'stop_market';
+type OrderType = 'market' | 'limit' | 'twap' | 'stop_market' | 'stop_limit' | 'take_market' | 'take_limit';
 
 interface OrderFormProps {
     symbol: string;
@@ -16,9 +15,9 @@ interface OrderFormProps {
     isAuthenticated: boolean;
     token?: string | null;
     walletBalance?: number;
-    agent?: any; // Pass agent object
+    agent?: any;
     isAgentActive?: boolean;
-    onEnableAgent?: () => void;
+    onEnableAgent?: () => Promise<any | null>;
     onLogin: () => void;
     onDeposit?: () => void;
     selectedPrice?: string;
@@ -32,28 +31,21 @@ interface OrderOverrideParams {
     orderType?: OrderType;
 }
 
-/**
- * OrderForm Component
- * 
- * The core trading interface for the Alpha Terminal.
- * Supports Market/Limit orders, advanced "Pro" order types (TWAP, Scale),
- * and "1-Click Trading" via an authorized Agent.
- * Listens for 'smart-trade-execute' events from news/intelligence systems.
- */
 export default function OrderForm({
     symbol,
     currentPrice,
     isAuthenticated,
     token,
-    walletBalance = 12450.00,
+    walletBalance = 0,
     agent,
     isAgentActive,
     onEnableAgent,
     onLogin,
     onDeposit,
     selectedPrice,
-    selectedSize
-}: OrderFormProps) {
+    selectedSize,
+    error: sessionError
+}: OrderFormProps & { error?: string | null }) {
 
     // State
     const { isConnected } = useAccount();
@@ -61,15 +53,19 @@ export default function OrderForm({
 
     const [side, setSide] = useState<'buy' | 'sell'>('buy');
     const [price, setPrice] = useState('');
+    const [triggerPrice, setTriggerPrice] = useState('');
     const [size, setSize] = useState('');
-    const [leverage, setLeverage] = useState(1);
+    const [leverage, setLeverage] = useState(20);
     const [marginMode, setMarginMode] = useState<'cross' | 'isolated'>('cross');
     const [orderType, setOrderType] = useState<OrderType>('market');
-    const [proType, setProType] = useState<ProOrderType>('none');
     const [reduceOnly, setReduceOnly] = useState(false);
     const [tpSlEnabled, setTpSlEnabled] = useState(false);
     const [takeProfit, setTakeProfit] = useState('');
     const [stopLoss, setStopLoss] = useState('');
+
+    // TWAP Specifics
+    const [twapRuntime, setTwapRuntime] = useState('30');
+    const [twapRandomize, setTwapRandomize] = useState(false);
 
     // UI State
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -78,6 +74,31 @@ export default function OrderForm({
     const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
     const [lastExternalPrice, setLastExternalPrice] = useState<string | undefined>();
     const [lastExternalSize, setLastExternalSize] = useState<string | undefined>();
+
+    // --- SESSION PERSISTENCE ---
+    useEffect(() => {
+        const savedLeverage = localStorage.getItem(`hl_leverage_${symbol}`);
+        if (savedLeverage) setLeverage(parseInt(savedLeverage));
+
+        const savedMargin = localStorage.getItem('hl_margin_mode');
+        if (savedMargin) setMarginMode(savedMargin as 'cross' | 'isolated');
+
+        const savedOrderType = localStorage.getItem('hl_order_type');
+        if (savedOrderType) setOrderType(savedOrderType as OrderType);
+    }, [symbol]);
+
+    useEffect(() => {
+        localStorage.setItem(`hl_leverage_${symbol}`, leverage.toString());
+    }, [leverage, symbol]);
+
+    useEffect(() => {
+        localStorage.setItem('hl_margin_mode', marginMode);
+    }, [marginMode]);
+
+    useEffect(() => {
+        localStorage.setItem('hl_order_type', orderType);
+    }, [orderType]);
+    // --- END PERSISTENCE ---
 
     /**
      * Updates local state when a price is selected from the orderbook or chart.
@@ -95,8 +116,22 @@ export default function OrderForm({
      * Supports both manual submission and automated 'override' submission.
      */
     const executeOrder = async (overrideParams?: OrderOverrideParams) => {
-        if (!isAuthenticated) {
-            onLogin();
+        // Check if user can trade
+        if (!isAuth) {
+            setResult({
+                success: false,
+                message: '⚠️ Connect your wallet to trade'
+            });
+            return;
+        }
+
+        // If wallet connected but no agent active, they need to enable 1-Click Terminal
+        // This is required because we need the Agent key to sign Hyperliquid orders
+        if (isConnected && !isAgentActive) {
+            setResult({
+                success: false,
+                message: '🔐 Enable 1-Click Terminal above to start trading'
+            });
             return;
         }
 
@@ -110,7 +145,7 @@ export default function OrderForm({
         setResult(null);
 
         try {
-            const finalOrderType = overrideParams?.orderType || (proType !== 'none' ? proType : orderType);
+            const finalOrderType = overrideParams?.orderType || orderType;
             const isBuy = (overrideParams?.side || side) === 'buy';
             let config: any = { headers: {} };
             if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -118,70 +153,126 @@ export default function OrderForm({
             // 1-Click Trading: Uses Agent key for low-latency signing
             if (isAgentActive && agent) {
                 const { ethers } = await import('ethers');
-                const { signAgentAction } = await import('../../utils/signing');
+                const { signAgentAction, floatToWire, roundPrice } = await import('../../utils/signing');
 
                 const wallet = new ethers.Wallet(agent.privateKey);
-                const nonce = Date.now();
 
                 // Construct Hyperliquid L1 Action
-                const assetId = (window as any)._assetMap?.[symbol] ?? 0;
+                const assetMap = (window as any)._assetMap || {};
+                const assetId = assetMap[symbol];
 
-                const orders: any[] = [
-                    {
-                        a: assetId,
-                        b: isBuy,
-                        p: (parseFloat(price) || currentPrice).toString(),
-                        s: parseFloat(finalSize.toString()).toString(),
-                        r: reduceOnly,
-                        t: finalOrderType === 'market'
-                            ? { limit: { tif: 'Ioc' } }
-                            : { limit: { tif: 'Gtc' } }
-                    }
-                ];
+                if (assetId === undefined) {
+                    setResult({ success: false, message: `❌ Terminal Sync Error: Asset ${symbol} mapping missing. Try refreshing.` });
+                    return;
+                }
+
+                const rawPrice = parseFloat(price) || currentPrice;
+                // Use aggressive 10% slippage for market orders to guarantee fill
+                const marketPrice = isBuy ? (rawPrice * 1.10) : (rawPrice * 0.90);
+                const finalPrice = finalOrderType === 'market' ? marketPrice : rawPrice;
+
+                const primaryOrder: any = {
+                    a: parseInt(assetId.toString()),
+                    b: isBuy,
+                    p: floatToWire(roundPrice(finalPrice)),
+                    s: floatToWire(parseFloat(finalSize.toString())),
+                    r: reduceOnly,
+                    t: finalOrderType === 'market'
+                        ? { limit: { tif: 'Ioc' } }
+                        : { limit: { tif: 'Gtc' } }
+                };
+
+                const orders: any[] = [primaryOrder];
 
                 // Bundle Safety Guards (TP/SL) if enabled
                 if (tpSlEnabled) {
-                    if (takeProfit) {
+                    if (takeProfit && !isNaN(parseFloat(takeProfit))) {
+                        const tpPrice = parseFloat(takeProfit);
                         orders.push({
-                            a: assetId,
+                            a: parseInt(assetId.toString()),
                             b: !isBuy,
-                            p: takeProfit.toString(),
-                            s: parseFloat(finalSize.toString()).toString(),
+                            // TP limit price should be aggressive (Lower for Sell/Long)
+                            p: floatToWire(roundPrice(isBuy ? tpPrice * 0.9 : tpPrice * 1.1)),
+                            s: floatToWire(parseFloat(finalSize.toString())),
                             r: true,
-                            t: { trigger: { isMarket: true, triggerPx: takeProfit.toString(), tpsl: 'tp' } }
+                            t: { trigger: { isMarket: true, triggerPx: floatToWire(roundPrice(tpPrice)), tpsl: 'tp' } }
                         });
                     }
-                    if (stopLoss) {
+                    if (stopLoss && !isNaN(parseFloat(stopLoss))) {
+                        const slPrice = parseFloat(stopLoss);
                         orders.push({
-                            a: assetId,
+                            a: parseInt(assetId.toString()),
                             b: !isBuy,
-                            p: stopLoss.toString(),
-                            s: parseFloat(finalSize.toString()).toString(),
+                            // SL limit price should be aggressive (Lower for Sell/Long)
+                            p: floatToWire(roundPrice(isBuy ? slPrice * 0.9 : slPrice * 1.1)),
+                            s: floatToWire(parseFloat(finalSize.toString())),
                             r: true,
-                            t: { trigger: { isMarket: true, triggerPx: stopLoss.toString(), tpsl: 'sl' } }
+                            t: { trigger: { isMarket: true, triggerPx: floatToWire(roundPrice(slPrice)), tpsl: 'sl' } }
                         });
                     }
                 }
 
-                const action = {
-                    type: "order",
-                    orders: orders,
-                    grouping: "na"
-                };
+                let action: any;
+                if (finalOrderType === 'twap') {
+                    action = {
+                        type: "twap",
+                        a: parseInt(assetId.toString()),
+                        b: isBuy,
+                        s: floatToWire(parseFloat(finalSize.toString())),
+                        r: reduceOnly,
+                        m: parseInt(twapRuntime || '30'),
+                        t: twapRandomize
+                    };
+                } else {
+                    action = {
+                        type: "order",
+                        orders: orders,
+                        grouping: "na"
+                    };
+                }
 
-                const signedPayload = await signAgentAction(wallet, action, nonce);
+                // Ensure leverage is synced on HL before placing order (if changed)
+                let lastNonce = Date.now();
+
+                if (leverage > 1) {
+                    try {
+                        const syncNonce = lastNonce;
+                        const levAction = {
+                            type: "updateLeverage",
+                            asset: parseInt(assetId.toString()),
+                            isCross: marginMode === 'cross',
+                            leverage: leverage
+                        };
+                        const levPayload = await signAgentAction(wallet, levAction, syncNonce);
+                        await axios.post(`${API_URL}/trading/order`, levPayload, config);
+
+                        // Increment nonce for the next call
+                        lastNonce = Math.max(Date.now(), syncNonce + 1);
+                        await new Promise(r => setTimeout(r, 50));
+                    } catch (e) {
+                        console.error("Leverage sync failed", e);
+                    }
+                }
+
+                const orderNonce = lastNonce;
+                const signedPayload = await signAgentAction(wallet, action, orderNonce);
 
                 const res = await axios.post(`${API_URL}/trading/order`, signedPayload, config);
 
-                if (res.data.status === 'ok' || res.data.status === 'filled') {
+                // Deep response inspection
+                const responseData = res.data.response;
+                const error = responseData?.data?.statuses?.[0]?.error;
+
+                if ((res.data.status === 'ok' || res.data.status === 'filled') && !error) {
                     setResult({
                         success: true,
-                        message: `⚡ 1-Click: ${isBuy ? 'LONG' : 'SHORT'} ${finalSize} ${symbol}${tpSlEnabled ? ' + Guards' : ''}`
+                        message: `⚡ 1-Click: ${isBuy ? 'LONG' : 'SHORT'} ${finalSize} ${symbol}`
                     });
-                } else if (res.data.status === 'err') {
-                    setResult({ success: false, message: res.data.error || res.data.message || 'Execution Error' });
                 } else {
-                    setResult({ success: true, message: 'Order Dispatched' });
+                    let errorMsg = error || res.data.error || res.data.message || 'Execution Error';
+                    if (typeof responseData === 'string' && responseData.toLowerCase().includes('error')) errorMsg = responseData;
+
+                    setResult({ success: false, message: `❌ ${errorMsg}` });
                 }
 
             } else {
@@ -195,7 +286,8 @@ export default function OrderForm({
                     leverage,
                     margin_mode: marginMode,
                     reduce_only: reduceOnly,
-                    tp_sl: tpSlEnabled ? { tp: parseFloat(takeProfit), sl: parseFloat(stopLoss) } : null
+                    tp_sl: tpSlEnabled ? { tp: parseFloat(takeProfit), sl: parseFloat(stopLoss) } : null,
+                    twap: finalOrderType === 'twap' ? { minutes: parseInt(twapRuntime), randomize: twapRandomize } : null
                 };
 
                 const res = await axios.post(`${API_URL}/trading/order`, orderPayload, config);
@@ -207,8 +299,22 @@ export default function OrderForm({
             }
 
         } catch (e: any) {
-            console.error('Terminal Order Error:', e);
-            setResult({ success: false, message: e.response?.data?.error || e.message || 'Execution Failed' });
+            // Enhanced error parsing for FastAPI/Pydantic (422) and standard errors
+            let errorMsg = 'Execution Failed';
+
+            if (e.response?.data) {
+                const data = e.response.data;
+                // Handle Pydantic validation errors (422)
+                if (data.detail && Array.isArray(data.detail)) {
+                    errorMsg = `Validation Error: ${data.detail[0].msg} (${data.detail[0].loc.join('.')})`;
+                } else {
+                    errorMsg = data.error || data.message || (typeof data === 'string' ? data : e.message);
+                }
+            } else {
+                errorMsg = e.message;
+            }
+
+            setResult({ success: false, message: errorMsg });
         } finally {
             setIsSubmitting(false);
         }
@@ -288,114 +394,158 @@ export default function OrderForm({
     // Financial Computations
     const orderValue = parseFloat(size || '0') * (parseFloat(price) || currentPrice);
     const marginRequired = orderValue / leverage;
-    const portfolioAllocation = walletBalance > 0 ? (marginRequired / walletBalance) * 100 : 0;
-    const isHighRisk = portfolioAllocation > 20 || leverage > 20;
+
+    // Improved risk calculation for low/zero balance
+    const portfolioAllocation = walletBalance > 0 ? (marginRequired / walletBalance) * 100 : (marginRequired > 0 ? 1000 : 0);
+    const isHighRisk = walletBalance <= 0 || portfolioAllocation > 20 || leverage > 20;
 
     const entryPriceNum = parseFloat(price) || currentPrice;
 
     // Safety guard for liquidation and Stop Loss calculations
-    const liqPrice = entryPriceNum > 0 ? (side === 'buy'
+    // For 1x leverage, liquidation is effectively impossible for longs (0)
+    const liqPrice = leverage <= 1.05 ? (side === 'buy' ? 0 : entryPriceNum * 2) : (entryPriceNum > 0 ? (side === 'buy'
         ? entryPriceNum * (1 - (1 / leverage) + 0.005)
-        : entryPriceNum * (1 + (1 / leverage) - 0.005)) : 0;
+        : entryPriceNum * (1 + (1 / leverage) - 0.005)) : 0);
 
     const suggestedSL = entryPriceNum > 0 ? (side === 'buy'
-        ? (entryPriceNum * 0.95).toFixed(2)
-        : (entryPriceNum * 1.05).toFixed(2)) : '0.00';
+        ? (entryPriceNum * 0.99).toFixed(2) // 1% gap for suggestion
+        : (entryPriceNum * 1.01).toFixed(2)) : '0.00';
 
-    const feeRate = 0.00025;
-    const estFees = orderValue * feeRate;
+    const networkFeeRate = 0.00025; // HL Taker Fee
+    const serviceFeeRate = 0.00010; // Protocol Markup
+    const estNetworkFees = orderValue * networkFeeRate;
+    const estServiceFee = orderValue * serviceFeeRate;
 
     return (
         <form onSubmit={handleSubmit} className="flex flex-col h-full gap-4 text-sm select-none">
+            {/* Strategy Selectors (PRO Level) */}
+            <div className="flex bg-white/[0.03] border border-white/5 rounded-xl p-1 gap-1">
+                {['Market', 'Limit', 'TWAP'].map((t) => (
+                    <button
+                        key={t}
+                        type="button"
+                        onClick={() => setOrderType(t.toLowerCase() as OrderType)}
+                        className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${orderType === t.toLowerCase() && !['stop_market', 'stop_limit', 'take_market', 'take_limit'].includes(orderType)
+                            ? 'bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]'
+                            : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                            }`}
+                    >
+                        {t}
+                    </button>
+                ))}
+                <div className="relative" ref={proMenuRef}>
+                    <button
+                        type="button"
+                        onClick={() => setShowProMenu(!showProMenu)}
+                        className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1 min-w-[60px] ${['stop_market', 'stop_limit', 'take_market', 'take_limit'].includes(orderType)
+                            ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                            : 'text-emerald-500/60 hover:text-emerald-400 hover:bg-emerald-500/5'
+                            }`}
+                    >
+                        {orderType.startsWith('stop') ? 'STOP' : orderType.startsWith('take') ? 'TAKE' : 'PRO'}
+                        <ChevronDown className="w-3 h-3" />
+                    </button>
+                    {showProMenu && (
+                        <div className="absolute top-full right-0 mt-2 w-36 bg-[#0c0c0c] border border-gray-800 rounded-xl shadow-2xl overflow-hidden z-[100] py-1 animate-in fade-in zoom-in-95 duration-200">
+                            {['Stop Market', 'Stop Limit', 'Take Market', 'Take Limit'].map((pt) => {
+                                const ptLower = pt.toLowerCase().replace(' ', '_') as OrderType;
+                                return (
+                                    <button
+                                        key={pt}
+                                        type="button"
+                                        onClick={() => {
+                                            setOrderType(ptLower);
+                                            setShowProMenu(false);
+                                        }}
+                                        className={`block w-full text-left px-4 py-2 text-[10px] uppercase font-black tracking-widest hover:bg-white/5 ${orderType === ptLower ? 'text-emerald-400' : 'text-gray-500 hover:text-white'}`}
+                                    >
+                                        {pt}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {/* Control Strip */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
                 <button
                     type="button"
                     title="Switch Margin Mode"
                     onClick={() => setMarginMode(m => m === 'cross' ? 'isolated' : 'cross')}
                     className="flex-1 bg-white/5 hover:bg-white/10 border border-[var(--glass-border)] rounded-lg py-1.5 font-bold text-gray-300 transition text-xs uppercase"
                 >
-                    {marginMode}
+                    {marginMode === 'cross' ? 'CROSS' : 'ISOLATED'}
                 </button>
-                <div className="flex-1 flex items-center bg-white/5 border border-[var(--glass-border)] rounded-lg px-2" title="Adjust Leverage">
-                    <span className="text-gray-400 text-xs mr-2">Lev</span>
+                <div className="w-px h-6 bg-white/10" />
+
+                <div className="flex-[2] flex flex-col bg-white/5 border border-[var(--glass-border)] rounded-lg px-3 py-1.5" title="Adjust Leverage">
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-gray-500 text-[9px] font-bold uppercase tracking-tighter">Leverage</span>
+                        <span className="text-white text-xs font-black font-mono">{leverage}x</span>
+                    </div>
                     <input
-                        type="number"
+                        type="range"
+                        min="1"
+                        max="50"
+                        step="1"
                         value={leverage}
-                        onChange={(e) => setLeverage(Math.min(50, Math.max(1, parseInt(e.target.value) || 1)))}
-                        className="bg-transparent w-full text-right font-bold text-gray-200 focus:outline-none text-xs"
+                        onChange={(e) => setLeverage(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[var(--color-primary)]"
                     />
-                    <span className="text-gray-500 text-xs ml-0.5">x</span>
                 </div>
-            </div>
 
-            <div
-                onClick={isAgentActive ? undefined : onEnableAgent}
-                title={isAgentActive ? "Agent active - orders sign automatically" : "Enable low-latency 1-click trading"}
-                className={`
-                        flex items-center justify-between px-3 py-2 rounded-lg border transition-all cursor-pointer group
-                        ${isAgentActive
-                        ? 'bg-[var(--color-primary)]/5 border-[var(--color-primary)]/30 text-[var(--color-primary)] shadow-[0_0_20px_var(--color-primary-glow)]'
-                        : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'}
-                    `}
-            >
-                <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${isAgentActive ? 'bg-[var(--color-primary)] animate-pulse' : 'bg-gray-500'}`} />
-                    <span className="text-[10px] font-black uppercase tracking-wider">1-Click Terminal</span>
-                </div>
-                <div className={`text-[10px] uppercase font-black transition-opacity ${isAgentActive ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`}>
-                    {isAgentActive ? 'Active' : 'Enable'}
-                </div>
-            </div>
-
-            {/* Strategy Tabs */}
-            <div className="flex border-b border-[var(--glass-border)]">
-                {['Market', 'Limit'].map((t) => (
-                    <button
-                        key={t}
-                        type="button"
-                        onClick={() => { setOrderType(t.toLowerCase() as OrderType); setProType('none'); }}
-                        className={`px-4 py-1.5 text-xs font-bold border-b-2 transition-colors ${orderType === t.toLowerCase() && proType === 'none'
-                            ? 'border-[var(--color-primary)] text-[var(--color-primary)]'
-                            : 'border-transparent text-gray-500 hover:text-gray-300'
-                            }`}
-                    >
-                        {t}
-                    </button>
-                ))}
-
-                <div className="relative" ref={proMenuRef}>
-                    <button
-                        type="button"
-                        onClick={() => setShowProMenu(!showProMenu)}
-                        className={`px-4 py-1.5 text-xs font-bold border-b-2 flex items-center gap-1 transition-colors ${proType !== 'none'
-                            ? 'border-[var(--color-primary)] text-[var(--color-primary)]'
-                            : 'border-transparent text-gray-500 hover:text-gray-300'
-                            }`}
-                    >
-                        {proType === 'none' ? 'Strategy' : proType.replace('_', ' ')}
-                        <ChevronDown className="w-3 h-3" />
-                    </button>
-
-                    {showProMenu && (
-                        <div className="absolute top-full left-0 mt-1 w-32 bg-[var(--background)] border border-[var(--glass-border)] rounded-lg shadow-2xl overflow-hidden z-20 py-1">
-                            {['Scale', 'TWAP', 'Stop Limit', 'Stop Market'].map((pt) => (
-                                <button
-                                    key={pt}
-                                    type="button"
-                                    onClick={() => {
-                                        setProType(pt.toLowerCase().replace(' ', '_') as ProOrderType);
-                                        setShowProMenu(false);
-                                    }}
-                                    className="block w-full text-left px-3 py-1.5 text-[11px] text-gray-300 hover:bg-white/10 hover:text-white"
-                                >
-                                    {pt}
-                                </button>
-                            ))}
+                {/* Tactical Master Switch - 1-Click Engagement */}
+                <button
+                    type="button"
+                    onClick={async () => {
+                        if (isAgentActive) return;
+                        try {
+                            if (onEnableAgent) await onEnableAgent();
+                        } catch (e: any) {
+                            setResult({ success: false, message: e.message || 'Failed to engage master engine' });
+                        }
+                    }}
+                    title={isAgentActive ? "Master Trade Engine Online" : "Click to Engage Master Engine"}
+                    className={`group relative flex flex-col items-center justify-center gap-1.5 px-3 py-2 border rounded-xl transition-all duration-500 self-stretch min-w-[70px] overflow-hidden ${isAgentActive
+                        ? 'bg-emerald-500/10 border-emerald-500/30'
+                        : isConnected
+                            ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/10 cursor-pointer'
+                            : 'bg-white/5 border-white/10 opacity-40 cursor-not-allowed'
+                        }`}
+                >
+                    {/* Switch Visual Status node */}
+                    <div className="flex items-center gap-1.5">
+                        <div className={`w-3 h-3 rounded-full flex items-center justify-center border transition-all duration-500 ${isAgentActive ? 'bg-emerald-500 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.8)]' : isConnected ? 'bg-amber-900 border-amber-700' : 'bg-gray-800 border-gray-700'
+                            }`}>
+                            {isAgentActive && <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />}
                         </div>
+                        <span className={`text-[11px] font-black tracking-tighter uppercase transition-colors duration-300 ${isAgentActive ? 'text-emerald-400' : isConnected ? 'text-amber-500/80 group-hover:text-amber-400' : 'text-gray-600'
+                            }`}>
+                            {isAgentActive ? 'ACTIVE' : 'ENGAGE'}
+                        </span>
+                    </div>
+
+                    {/* Sub-label for Engine Type */}
+                    <span className={`text-[8px] font-bold uppercase tracking-[0.2em] transition-colors duration-300 ${isAgentActive ? 'text-emerald-500/50' : 'text-gray-600'}`}>
+                        1-Click
+                    </span>
+
+                    {/* Active State Scanline Animation */}
+                    {isAgentActive && (
+                        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-emerald-400/5 to-transparent h-[100%] w-full animate-scanline pointer-events-none" />
                     )}
-                </div>
+                </button>
             </div>
+
+            {/* Hook Error Display */}
+            {sessionError && !isAgentActive && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2 text-[10px] text-red-400 font-bold animate-in fade-in slide-in-from-top-1">
+                    ⚠️ {sessionError}
+                </div>
+            )}
+
 
             {/* Wallet Integration */}
             <div className="flex justify-between items-center text-[10px] text-gray-500 px-1">
@@ -442,7 +592,7 @@ export default function OrderForm({
 
             {/* Numeric Controls */}
             <div className="space-y-3">
-                {(orderType === 'limit' || proType !== 'none') && (
+                {(orderType === 'limit' || orderType === 'stop_limit' || orderType === 'take_limit') && (
                     <div className="bg-[var(--background)]/50 border border-[var(--glass-border)] rounded-lg px-3 py-2 flex items-center justify-between">
                         <span className="text-gray-500 text-[10px] font-bold uppercase">Price</span>
                         <div className="flex items-center gap-2">
@@ -497,33 +647,88 @@ export default function OrderForm({
                 </div>
             </div>
 
-            {/* Predictive Risk Hub */}
-            {size && (
-                <div className={`rounded-lg p-2.5 text-[11px] border leading-relaxed transition-all ${isHighRisk ? 'bg-[var(--color-bearish)]/10 border-[var(--color-bearish)]/30 text-[var(--color-bearish)]/80' : 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30 text-[var(--color-primary)]'}`}>
-                    <div className="flex items-center gap-1.5 mb-1 font-black uppercase tracking-tighter">
-                        <Info className="w-3 h-3" />
-                        {isHighRisk ? 'Critical Risk Advisory' : 'Terminal Intelligence'}
+            {/* TWAP Configuration (Dynamic) */}
+            {orderType === 'twap' && (
+                <div className="space-y-3 p-3 bg-purple-500/5 border border-purple-500/20 rounded-xl animate-in slide-in-from-top-1">
+                    <div className="flex items-center justify-between">
+                        <span className="text-purple-400 text-[9px] font-black uppercase tracking-widest">TWAP Run Time</span>
+                        <div className="flex items-center gap-1.5 bg-black/40 px-2 py-1 rounded border border-white/5">
+                            <input
+                                type="number"
+                                value={twapRuntime}
+                                onChange={(e) => setTwapRuntime(e.target.value)}
+                                className="bg-transparent text-right font-mono text-[11px] focus:outline-none w-10 text-white"
+                                placeholder="30"
+                            />
+                            <span className="text-gray-600 text-[8px] font-bold">MIN</span>
+                        </div>
                     </div>
-                    <p className="opacity-75 mb-2">
-                        {isHighRisk
-                            ? `Danger: Capital allocation is ${portfolioAllocation.toFixed(1)}%. High risk of liquidation.`
-                            : 'Optimal position metrics. Execution profile categorized as institutional-grade.'}
-                    </p>
 
-                    {!tpSlEnabled && (
+                    <div className="flex items-center justify-between">
+                        <div className="flex flex-col">
+                            <span className="text-gray-400 text-[9px] font-black uppercase tracking-tighter">Randomize Slices</span>
+                            <span className="text-[8px] text-gray-600">Obfuscates bot footprint</span>
+                        </div>
                         <button
                             type="button"
-                            onClick={() => {
-                                setTpSlEnabled(true);
-                                setStopLoss(suggestedSL);
-                            }}
-                            className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-[var(--glass-border)] rounded px-2 py-1 transition-colors text-[10px] font-bold text-[var(--color-primary)]"
+                            onClick={() => setTwapRandomize(!twapRandomize)}
+                            className={`w-8 h-4 rounded-full p-0.5 transition-colors ${twapRandomize ? 'bg-purple-500' : 'bg-gray-800'}`}
                         >
-                            <span>Suggest SL: {suggestedSL}</span>
+                            <div className={`w-3 h-3 bg-white rounded-full transition-transform ${twapRandomize ? 'translate-x-[18px]' : 'translate-x-0'}`} />
                         </button>
-                    )}
+                    </div>
+
+                    <div className="pt-1.5 border-t border-purple-500/10 flex items-center gap-2">
+                        <Zap className="w-2.5 h-2.5 text-purple-400 animate-pulse" />
+                        <span className="text-[8px] text-purple-400/80 font-bold leading-tight">
+                            Total {size || '0'} {symbol} will be spread over {twapRuntime}m via adaptive smart liquidity.
+                        </span>
+                    </div>
                 </div>
             )}
+
+            {/* Predictive Risk Hub */}
+            {
+                size && (
+                    <div className={`rounded-lg p-2.5 text-[11px] border leading-relaxed transition-all ${walletBalance <= 0
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                        : isHighRisk
+                            ? 'bg-[var(--color-bearish)]/10 border-[var(--color-bearish)]/30 text-[var(--color-bearish)]/80'
+                            : 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30 text-[var(--color-primary)]'
+                        }`}>
+                        <div className="flex items-center gap-1.5 mb-1 font-black uppercase tracking-tighter">
+                            <Info className="w-3 h-3" />
+                            {walletBalance <= 0
+                                ? '⚠️ No Funds Detected'
+                                : isHighRisk
+                                    ? 'Critical Risk Advisory'
+                                    : 'Terminal Intelligence'
+                            }
+                        </div>
+                        <p className="opacity-75 mb-2">
+                            {walletBalance <= 0
+                                ? 'Deposit funds to your Hyperliquid account to start trading. Click DEPOSIT above.'
+                                : isHighRisk
+                                    ? `Danger: Capital allocation is ${portfolioAllocation.toFixed(1)}%. High risk of liquidation.`
+                                    : `Position uses ${portfolioAllocation.toFixed(1)}% of $${walletBalance.toFixed(2)} balance.`
+                            }
+                        </p>
+
+                        {walletBalance > 0 && !tpSlEnabled && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setTpSlEnabled(true);
+                                    setStopLoss(suggestedSL);
+                                }}
+                                className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-[var(--glass-border)] rounded px-2 py-1 transition-colors text-[10px] font-bold text-[var(--color-primary)]"
+                            >
+                                <span>Suggest SL: {suggestedSL}</span>
+                            </button>
+                        )}
+                    </div>
+                )
+            }
 
             {/* Guard Rails (TP/SL) */}
             <div>
@@ -564,17 +769,33 @@ export default function OrderForm({
                                     onClick={() => {
                                         const entry = (orderType === 'limit' && parseFloat(price) > 0) ? parseFloat(price) : currentPrice;
                                         if (entry > 0) {
-                                            const slPrice = side === 'buy' ? entry * 0.99 : entry * 1.01;
-                                            setStopLoss(slPrice.toFixed(entry > 1000 ? 1 : 4));
+                                            // SL at 2% for safer default "Auto"
+                                            const slPercent = 0.02;
+                                            const slPrice = side === 'buy' ? entry * (1 - slPercent) : entry * (1 + slPercent);
+
+                                            // Precision rounding
+                                            const dp = entry > 1000 ? 1 : entry > 10 ? 2 : 4;
+                                            setStopLoss(slPrice.toFixed(dp));
                                             setTpSlEnabled(true);
-                                            const riskAmt = (walletBalance > 0 ? walletBalance : 10000) * 0.01;
+
+                                            // Risk 10% of equity on this 2% move
+                                            // Loss = Size * |Entry - SL|
+                                            // Size = 0.10 * Balance / |Entry - SL|
+                                            const riskPercent = 0.10;
+                                            const bal = (walletBalance > 0 ? walletBalance : 100);
+                                            const riskAmt = bal * riskPercent;
                                             const diff = Math.abs(entry - slPrice);
-                                            if (diff > 0) setSize((riskAmt / diff).toFixed(5));
+
+                                            if (diff > 0) {
+                                                const calculatedSize = riskAmt / diff;
+                                                // Format size normally
+                                                setSize(calculatedSize.toFixed(symbol === 'BTC' || symbol === 'ETH' ? 3 : 1));
+                                            }
                                         }
                                     }}
                                     className="bg-[var(--color-primary)] hover:opacity-80 text-black text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg transition-all"
                                 >
-                                    AUTO 1%
+                                    AUTO 10%
                                 </button>
                             </div>
                         </div>
@@ -595,6 +816,14 @@ export default function OrderForm({
                 <div className="flex justify-between text-[10px]">
                     <span className="text-gray-600 uppercase font-bold tracking-tighter">Est. Liq</span>
                     <span className="text-[var(--color-accent-orange)] font-mono font-bold">${liqPrice.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-600 uppercase font-bold tracking-tighter">Network Fee</span>
+                    <span className="text-gray-400 font-mono">${estNetworkFees.toFixed(3)} USDC</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                    <span className="text-purple-500/60 uppercase font-black tracking-tighter">Sentry Service</span>
+                    <span className="text-purple-400 font-mono font-bold">${estServiceFee.toFixed(3)} USDC</span>
                 </div>
             </div>
 
@@ -617,13 +846,15 @@ export default function OrderForm({
             </button>
 
             {/* Response Channel */}
-            {result && (
-                <div className={`flex items-center gap-2 p-2.5 rounded-xl text-[10px] font-bold mt-1 border animate-in slide-in-from-bottom-2 duration-300 ${result.success ? 'bg-[var(--color-bullish)]/10 text-[var(--color-bullish)] border-[var(--color-bullish)]/20' : 'bg-[var(--color-bearish)]/10 text-[var(--color-bearish)] border-[var(--color-bearish)]/20'
-                    }`}>
-                    <AlertCircle className="w-3 h-3 flex-shrink-0" />
-                    {result.message}
-                </div>
-            )}
-        </form>
+            {
+                result && (
+                    <div className={`flex items-center gap-2 p-2.5 rounded-xl text-[10px] font-bold mt-1 border animate-in slide-in-from-bottom-2 duration-300 ${result.success ? 'bg-[var(--color-bullish)]/10 text-[var(--color-bullish)] border-[var(--color-bullish)]/20' : 'bg-[var(--color-bearish)]/10 text-[var(--color-bearish)] border-[var(--color-bearish)]/20'
+                        }`}>
+                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                        {result.message}
+                    </div>
+                )
+            }
+        </form >
     );
 }

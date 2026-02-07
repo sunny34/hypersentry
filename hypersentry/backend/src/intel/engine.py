@@ -1,0 +1,83 @@
+import asyncio
+import logging
+import datetime
+from typing import List, Dict, Any
+from src.ws_manager import manager as ws_manager
+from .providers.rss import RSSProvider
+from .providers.twitter import TwitterProvider
+from .providers.telegram import TelegramProvider
+
+logger = logging.getLogger(__name__)
+
+class IntelEngine:
+    """
+    The main orchestrator for real-time intelligence gathering.
+    Polls various sources and broadcasts high-impact events to clients.
+    """
+    def __init__(self):
+        self.providers = [
+            RSSProvider(),
+            TwitterProvider(),
+            TelegramProvider()
+        ]
+        self.cache = set() # To prevent duplicate broadcasts
+        self.recent_items = [] # To store actual items for REST access
+        self.is_running = False
+        self.polling_interval = 10 # 10 seconds polling (can be reduced for Twitter/Telegram)
+
+    async def start(self):
+        """Start the background intel gathering loop."""
+        if self.is_running:
+            return
+        
+        self.is_running = True
+        logger.info("📡 Intel Engine Online. Orchestrating Multi-Source Intelligence...")
+        
+        while self.is_running:
+            try:
+                tasks = [provider.fetch_latest() for provider in self.providers]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                new_items = []
+                for res in results:
+                    if isinstance(res, list):
+                        for item in res:
+                            if item["id"] not in self.cache:
+                                new_items.append(item)
+                                self.cache.add(item["id"])
+                    elif isinstance(res, Exception):
+                        logger.error(f"Provider failed: {res}")
+
+                # Broadcast new intelligence
+                if new_items:
+                    # Sort by timestamp
+                    new_items.sort(key=lambda x: x["timestamp"], reverse=True)
+                    
+                    # Store in recent_items
+                    self.recent_items = (new_items + self.recent_items)[:200]
+                    
+                    logger.info(f"🔥 Found {len(new_items)} new Alpha signals. Broadcasting...")
+                    await ws_manager.broadcast({
+                        "type": "intel_alpha",
+                        "data": new_items
+                    })
+
+                # Maintain cache size
+                if len(self.cache) > 1000:
+                    self.cache = set(list(self.cache)[-500:])
+                    
+                # Clean up recent items to keep only last 200
+                if len(self.recent_items) > 200:
+                    self.recent_items = self.recent_items[:200]
+
+            except Exception as e:
+                logger.error(f"Intel Engine Error: {e}")
+
+            await asyncio.sleep(self.polling_interval)
+
+    def stop(self):
+        self.is_running = False
+        logger.info("🛑 Intel Engine Offline.")
+
+# Global instance
+engine = IntelEngine()
