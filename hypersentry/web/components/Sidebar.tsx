@@ -48,7 +48,7 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
     const getPathView = (path: string) => {
         if (path === '/') return 'dashboard';
         if (path.includes('/terminal')) return 'terminal';
-        if (path.includes('/strategies')) return 'strategies';
+        if (path.includes('/terminal')) return 'terminal';
         if (path.includes('/arb')) return 'arb';
         return 'dashboard';
     };
@@ -61,14 +61,14 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
         if (newView === 'terminal') {
             router.push('/terminal');
         } else if (newView === 'strategies') {
-            router.push('/strategies');
+            router.push('/terminal?tab=lab');
         } else if (newView === 'arb') {
             router.push('/arb');
         } else if (newView === 'risk') {
             router.push('/risk');
         } else if (newView === 'settings') {
             router.push('/settings');
-        } else if (pathname === '/terminal' || pathname === '/strategies' || pathname === '/arb' || pathname === '/risk') {
+        } else if (pathname === '/terminal' || pathname === '/arb' || pathname === '/risk') {
             router.push('/');
         } else {
             setView?.(newView);
@@ -167,15 +167,6 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
                             )}
                         </div>
                         {!isCollapsed && <span className="font-medium whitespace-nowrap">Trading Terminal</span>}
-                    </button>
-
-                    <button
-                        onClick={() => handleViewChange('twap')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'twap' ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-gray-400 hover:bg-white/5 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
-                        title={isCollapsed ? "Whale Monitor" : ""}
-                    >
-                        <Activity className="w-5 h-5 shrink-0" />
-                        {!isCollapsed && <span className="font-medium whitespace-nowrap">Whale Monitor</span>}
                     </button>
 
                     <button

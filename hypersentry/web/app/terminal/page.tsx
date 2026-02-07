@@ -1,12 +1,14 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from 'react';
 import axios from 'axios';
-import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3, Newspaper, Menu, Sparkles, Skull, Command, Users, Activity, Loader2, Settings, Shield, Maximize2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3, Newspaper, Menu, Sparkles, Skull, Command, Users, Activity, Loader2, Settings, Shield, Maximize2, Plus } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import { useAuth } from '@/contexts/AuthContext';
 import Sidebar from '@/components/Sidebar';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useSidebar } from '@/contexts/SidebarContext';
+import StrategySimulator from '@/components/trading/StrategySimulator';
 import TokenSelector from '@/components/trading/TokenSelector';
 import TimeframeSelector from '@/components/trading/TimeframeSelector';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -92,11 +94,21 @@ function TradingTerminalContent() {
     const [tokens, setTokens] = useState<Token[]>([]);
     const [selectedToken, setSelectedToken] = useState<string>('BTC');
     const [selectedInterval, setSelectedInterval] = useState('60');
-    const [activeTab, setActiveTab] = useState<'analysis' | 'news' | 'liquidations' | 'positions' | 'orders' | 'cohorts' | 'twap' | 'pro'>('positions');
+    const [activeTab, setActiveTab] = useState<'analysis' | 'news' | 'liquidations' | 'positions' | 'orders' | 'cohorts' | 'twap' | 'pro' | 'lab'>('positions');
     const [aiBias, setAiBias] = useState<'bullish' | 'bearish' | 'neutral'>('neutral');
     const [currentPrice, setCurrentPrice] = useState<number>(0);
     const [priceChangePercent, setPriceChangePercent] = useState<number>(0);
     const [isLoadingTokens, setIsLoadingTokens] = useState(true);
+    const searchParams = useSearchParams();
+    const router = useRouter();
+
+    // Sync tab with URL
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab && ['positions', 'orders', 'analysis', 'twap', 'pro', 'lab', 'cohorts', 'news', 'liquidations'].includes(tab)) {
+            setActiveTab(tab as any);
+        }
+    }, [searchParams]);
     const [notification, setNotification] = useState<{ title: string; message: string; type: 'bullish' | 'bearish' | 'neutral' } | null>(null);
     const [showAdd, setShowAdd] = useState(false);
     const [showImport, setShowImport] = useState(false);
@@ -117,6 +129,7 @@ function TradingTerminalContent() {
             { id: 'analysis', label: 'AI Intel', icon: Sparkles, color: 'text-purple-400' },
             { id: 'twap', label: 'TWAP Intel', icon: Activity, color: 'text-purple-500' },
             { id: 'pro', label: 'Pro', icon: Shield, color: 'text-emerald-400' },
+            { id: 'lab', label: 'Lab', icon: Activity, color: 'text-blue-400' },
             { id: 'cohorts', label: 'Social', icon: Users, color: 'text-teal-400' },
             { id: 'news', label: 'News', icon: Newspaper, color: 'text-blue-300' },
             { id: 'liquidations', label: 'Firehose', icon: Skull, color: 'text-red-400' },
@@ -709,6 +722,142 @@ function TradingTerminalContent() {
                                                 </div>
                                             )}
                                         </div>
+                                    </div>
+                                </div>
+                            ) : activeTab === 'lab' ? (
+                                <div className="grid grid-cols-[280px_1fr] h-full overflow-hidden bg-black/40">
+                                    {/* Strategy Portfolio Sidebar */}
+                                    <div className="border-r border-white/5 bg-black/20 p-4 overflow-y-auto space-y-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-2">
+                                                <Settings className="w-3.5 h-3.5" />
+                                                Active Portfolio
+                                            </h3>
+                                            <span className="text-[8px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-black">2 ACTIVE</span>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/30 relative overflow-hidden group hover:border-blue-500/60 transition cursor-pointer">
+                                                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                                                <div className="flex justify-between items-start mb-1">
+                                                    <div className="text-[11px] font-black uppercase text-white">Funding Rate Arb</div>
+                                                    <span className="text-[7px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-black uppercase">Active</span>
+                                                </div>
+                                                <p className="text-[9px] text-gray-400 mb-2 leading-tight">Captures yield from positive funding rates.</p>
+                                                <div className="flex gap-4 text-[9px] font-mono">
+                                                    <div>
+                                                        <div className="text-gray-500 uppercase text-[7px] font-black">24h PnL</div>
+                                                        <div className="text-emerald-400 font-black">+1.24%</div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-gray-500 uppercase text-[7px] font-black">Win Rate</div>
+                                                        <div className="text-gray-300 font-black">68%</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="p-3 bg-white/5 rounded-xl border border-white/10 hover:border-white/20 transition cursor-pointer opacity-70 hover:opacity-100">
+                                                <div className="flex justify-between items-start mb-1">
+                                                    <div className="text-[11px] font-black uppercase text-white">RSI Reversal</div>
+                                                    <span className="text-[7px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded font-black uppercase tracking-widest">Idle</span>
+                                                </div>
+                                                <p className="text-[9px] text-gray-400 mb-2 leading-tight">Mean reversion at extreme RSI levels.</p>
+                                                <div className="flex gap-4 text-[9px] font-mono">
+                                                    <div>
+                                                        <div className="text-gray-500 uppercase text-[7px] font-black">Daily PnL</div>
+                                                        <div className="text-gray-600 font-black">--%</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <button
+                                                onClick={() => setNotification({
+                                                    title: "Engine Update Scheduled",
+                                                    message: "Custom Strategy Editor is scheduled for Deployment v0.3. Alpha access pending.",
+                                                    type: 'neutral'
+                                                })}
+                                                className="w-full mt-2 py-3 rounded-xl border border-dashed border-white/10 text-gray-600 font-black text-[9px] uppercase tracking-widest hover:border-white/20 hover:text-gray-400 transition flex items-center justify-center gap-2"
+                                            >
+                                                <Plus className="w-3.5 h-3.5" />
+                                                New Strategy
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Strategy Lab Simulator */}
+                                    <div className="h-full overflow-hidden">
+                                        <StrategySimulator
+                                            symbol={selectedToken}
+                                            currentPrice={currentPrice}
+                                            fundingRate={selectedTokenData?.funding || 0}
+                                            onCopyTrade={async (side: 'buy' | 'sell', price: number, type: 'market' | 'limit') => {
+                                                setNotification({
+                                                    title: "Strategizing Signal...",
+                                                    message: `Capturing ${side.toUpperCase()} signature for ${selectedToken} at $${price}...`,
+                                                    type: 'neutral'
+                                                });
+
+                                                if (isAgentActive && agent) {
+                                                    try {
+                                                        const { ethers } = await import('ethers');
+                                                        const { signAgentAction, floatToWire, roundPrice } = await import('@/utils/signing');
+
+                                                        const wallet = new ethers.Wallet(agent.privateKey);
+                                                        const assetMap = (window as any)._assetMap || {};
+                                                        const assetId = assetMap[selectedToken];
+
+                                                        if (assetId === undefined) {
+                                                            throw new Error(`Asset mapping missing for ${selectedToken}. Refreshing recommended.`);
+                                                        }
+
+                                                        const isBuy = side === 'buy';
+                                                        const slippagePrice = isBuy ? (price * 1.10) : (price * 0.90);
+                                                        const finalPrice = type === 'market' ? slippagePrice : price;
+                                                        const calcSize = (100 / price).toFixed(4);
+
+                                                        const action = {
+                                                            type: "order",
+                                                            orders: [{
+                                                                a: parseInt(assetId.toString()),
+                                                                b: isBuy,
+                                                                p: floatToWire(roundPrice(finalPrice)),
+                                                                s: floatToWire(parseFloat(calcSize)),
+                                                                r: false,
+                                                                t: type === 'market' ? { limit: { tif: 'Ioc' } } : { limit: { tif: 'Gtc' } }
+                                                            }],
+                                                            grouping: "na"
+                                                        };
+
+                                                        const signedPayload = await signAgentAction(wallet, action, Date.now());
+                                                        const res = await axios.post(`${API_URL}/trading/order`, signedPayload, {
+                                                            headers: token ? { Authorization: `Bearer ${token}` } : {}
+                                                        });
+
+                                                        if (res.data.status === 'ok' || res.data.response?.data?.statuses?.[0]?.error === undefined) {
+                                                            setNotification({
+                                                                title: "Strategy Executed",
+                                                                message: `Successfully launched ${side.toUpperCase()} ${calcSize} ${selectedToken} via 1-Click Engine.`,
+                                                                type: side === 'buy' ? 'bullish' : 'bearish'
+                                                            });
+                                                        } else {
+                                                            throw new Error(res.data.response?.data?.statuses?.[0]?.error || "Execution failed");
+                                                        }
+                                                    } catch (e: any) {
+                                                        setNotification({
+                                                            title: "Execution Shield Error",
+                                                            message: e.message || "Failed to automate strategy signal.",
+                                                            type: 'neutral'
+                                                        });
+                                                    }
+                                                } else {
+                                                    setNotification({
+                                                        title: "Signal Captured",
+                                                        message: `Refining ${side.toUpperCase()} signal for ${selectedToken}. Enable 1-Click for automated launch.`,
+                                                        type: 'neutral'
+                                                    });
+                                                }
+                                            }}
+                                        />
                                     </div>
                                 </div>
                             ) : (

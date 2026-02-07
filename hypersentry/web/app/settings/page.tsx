@@ -13,6 +13,7 @@ export default function SettingsPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [showAddModal, setShowAddModal] = useState(false);
     const [newKey, setNewKey] = useState({ exchange: 'binance', api_key: '', api_secret: '', label: '' });
+    const [notification, setNotification] = useState<{ title: string; message: string; type: 'success' | 'error' | 'neutral' } | null>(null);
 
     const { token, isAuthenticated } = useAuth();
     const { theme, setTheme } = useTheme();
@@ -45,9 +46,20 @@ export default function SettingsPage() {
         if (isAuthenticated) fetchKeys();
     }, [isAuthenticated, token]);
 
+    useEffect(() => {
+        if (notification) {
+            const timer = setTimeout(() => setNotification(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [notification]);
+
     const handleAddKey = async () => {
         if (!newKey.api_key || !newKey.api_secret) {
-            alert("Please enter both API Key and Secret.");
+            setNotification({
+                title: "Validation Error",
+                message: "Please enter both API Key and Secret to proceed.",
+                type: 'error'
+            });
             return;
         }
 
@@ -59,17 +71,30 @@ export default function SettingsPage() {
             setShowAddModal(false);
             fetchKeys();
             setNewKey({ exchange: 'binance', api_key: '', api_secret: '', label: '' });
+            setNotification({
+                title: "Success",
+                message: "API Key connected and encrypted successfully.",
+                type: 'success'
+            });
         } catch (e: any) {
-            alert(`Failed to add key: ${e.response?.data?.detail || e.message}`);
+            setNotification({
+                title: "Connection Failed",
+                message: e.response?.data?.detail || e.message,
+                type: 'error'
+            });
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("Are you sure you want to delete this key?")) return;
+    const handleDelete = async (id: string, label?: string) => {
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
             await axios.delete(`${apiUrl}/settings/keys/${id}`, {
                 headers: { Authorization: `Bearer ${token}` }
+            });
+            setNotification({
+                title: "Key Removed",
+                message: `Connection to ${label || 'exchange'} has been terminated.`,
+                type: 'neutral'
             });
             fetchKeys();
         } catch (e) {
@@ -323,6 +348,28 @@ export default function SettingsPage() {
                                     <Shield size={10} />
                                     AES-256 BANK-GRADE ENCRYPTION ACTIVE
                                 </p>
+                            </div>
+                        </div>
+                    )}
+                    {/* Notifications */}
+                    {notification && (
+                        <div className={`fixed top-6 right-6 z-[100] p-4 rounded-xl border backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 max-w-sm
+                            ${notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100' :
+                                notification.type === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-100' :
+                                    'bg-gray-800/90 border-gray-700 text-gray-200'}`}>
+                            <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${notification.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' :
+                                        notification.type === 'error' ? 'bg-red-500/20 text-red-400' :
+                                            'bg-gray-700 text-gray-400'
+                                    }`}>
+                                    {notification.type === 'success' ? <Check size={18} /> :
+                                        notification.type === 'error' ? <Shield size={18} /> :
+                                            <Zap size={18} />}
+                                </div>
+                                <div>
+                                    <div className="text-xs font-black uppercase tracking-widest leading-none mb-1">{notification.title}</div>
+                                    <div className="text-[11px] opacity-70 leading-snug">{notification.message}</div>
+                                </div>
                             </div>
                         </div>
                     )}

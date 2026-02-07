@@ -26,6 +26,7 @@ export default function ClosePositionModal({ position, onClose, onConfirm }: Clo
     const [size, setSize] = useState<string>(Math.abs(position.size).toString());
     const [percent, setPercent] = useState<number>(100);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     // Update size based on percentage
     useEffect(() => {
@@ -39,6 +40,7 @@ export default function ClosePositionModal({ position, onClose, onConfirm }: Clo
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
+        setError(null);
         try {
             const finalPrice = closeType === 'market' ? 'market' : parseFloat(price);
             const finalSize = parseFloat(size);
@@ -53,7 +55,8 @@ export default function ClosePositionModal({ position, onClose, onConfirm }: Clo
             await onConfirm(finalPrice, finalSize);
             onClose();
         } catch (e: any) {
-            alert(e.message);
+            setError(e.message);
+            setTimeout(() => setError(null), 10000);
         } finally {
             setIsSubmitting(false);
         }
@@ -144,8 +147,8 @@ export default function ClosePositionModal({ position, onClose, onConfirm }: Clo
                                     type="button"
                                     onClick={() => setPercent(p)}
                                     className={`py-1.5 text-[10px] font-black rounded-lg border transition-all ${percent === p
-                                            ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30 text-[var(--color-primary)]'
-                                            : 'bg-white/5 border-white/5 text-gray-500 hover:text-gray-300'
+                                        ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30 text-[var(--color-primary)]'
+                                        : 'bg-white/5 border-white/5 text-gray-500 hover:text-gray-300'
                                         }`}
                                 >
                                     {p}%
@@ -168,13 +171,20 @@ export default function ClosePositionModal({ position, onClose, onConfirm }: Clo
                         </div>
                     </div>
 
+                    {error && (
+                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-500 text-[11px] font-bold animate-in slide-in-from-top-2 duration-300">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            {error}
+                        </div>
+                    )}
+
                     {/* Action Button */}
                     <button
                         type="submit"
                         disabled={isSubmitting}
                         className={`w-full py-4 rounded-xl font-black uppercase tracking-widest text-sm transition-all shadow-xl flex items-center justify-center gap-2 ${position.side === 'LONG'
-                                ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/20'
-                                : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'
+                            ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/20'
+                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'
                             }`}
                     >
                         {isSubmitting ? (
@@ -183,7 +193,7 @@ export default function ClosePositionModal({ position, onClose, onConfirm }: Clo
                             `Confirm ${closeType} Close`
                         )}
                     </button>
-
+                    泛
                     <div className="flex items-start gap-2 text-[10px] text-gray-500 bg-white/5 p-3 rounded-lg border border-white/5 leading-relaxed">
                         <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
                         <span>Closing this position will cancel any active Safety Guards (TP/SL) for {position.coin} if fully closed.</span>

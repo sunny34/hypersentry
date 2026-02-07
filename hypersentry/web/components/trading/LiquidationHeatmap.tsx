@@ -263,10 +263,10 @@ export default function LiquidationHeatmap({
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Main Chart Area */}
-                <div className="flex-1 relative py-4 px-2 overflow-hidden" style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}>
+                <div className="flex-1 relative py-4 px-2 overflow-hidden">
 
                     {viewMode === 'heatmap' ? (
-                        <div className="absolute inset-0 p-4">
+                        <>
                             <div className="relative w-full h-full border border-white/5 rounded-2xl overflow-hidden bg-black/40 shadow-inner group">
                                 <HeatmapCanvas
                                     currentPrice={currentPrice}
@@ -275,27 +275,27 @@ export default function LiquidationHeatmap({
                                     zoomLevel={zoomLevel}
                                     onPriceSelect={onPriceSelect}
                                 />
+                            </div>
 
-                                {/* Professional Legend Overlay */}
-                                <div className="absolute bottom-4 left-4 flex flex-col gap-2 p-3 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl z-30">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
-                                        <span className="text-[10px] text-gray-300 font-black uppercase">Sell Liquidity</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
-                                        <span className="text-[10px] text-gray-300 font-black uppercase">Buy Liquidity</span>
-                                    </div>
-                                    <div className="w-full h-px bg-white/5 my-1" />
-                                    <div className="flex items-center gap-2">
-                                        <Zap className="w-3 h-3 text-orange-400" />
-                                        <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Resolving: 256 Levels</span>
-                                    </div>
+                            {/* Stable Legend Overlay (Not Scaled) */}
+                            <div className="absolute bottom-6 left-6 flex items-center gap-6 px-4 py-2.5 bg-black/60 backdrop-blur-md border border-white/5 rounded-xl z-40 pointer-events-none">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                                    <span className="text-[9px] text-gray-400 font-black uppercase tracking-widest">Sell Liquidity</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
+                                    <span className="text-[9px] text-gray-400 font-black uppercase tracking-widest">Buy Liquidity</span>
+                                </div>
+                                <div className="w-px h-3 bg-white/10" />
+                                <div className="flex items-center gap-2">
+                                    <Zap className="w-3 h-3 text-orange-400/50" />
+                                    <span className="text-[8px] text-gray-600 font-black uppercase tracking-tighter">Scanning 256 Levels</span>
                                 </div>
                             </div>
-                        </div>
+                        </>
                     ) : (
-                        <>
+                        <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }} className="absolute inset-0">
                             {/* Current Price Line */}
                             <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 z-20 flex items-center">
                                 <div className="flex-1 h-[2px] bg-gradient-to-r from-transparent via-[var(--color-primary)] to-transparent shadow-[0_0_20px_var(--color-primary-glow)]" />
@@ -401,7 +401,7 @@ export default function LiquidationHeatmap({
                                     );
                                 })}
                             </div>
-                        </>
+                        </div>
                     )}
                 </div>
 
@@ -563,19 +563,19 @@ function HeatmapCanvas({ currentPrice, liqLevels, zoomLevel, onPriceSelect }: an
             const isKey = topClusters.some(c => c.price === level.price);
             const baseColor = level.side === 'short' ? '16, 185, 129' : '239, 68, 68';
 
-            // Generate dense "Gravity Wells"
-            for (let col = 0; col < 12; col++) {
-                const x = (w * 0.05) + (col * (w * 0.08));
-                // Amplify key clusters
-                const intensityScale = isKey ? level.intensity * 1.4 : level.intensity;
-                const size = (25 + intensityScale * 65) * zoomLevel;
-                const glowSize = size * 1.8;
+            // Generate sharp "Gravity Clusters" instead of massive blobs
+            for (let col = 0; col < 10; col++) {
+                const x = (w * 0.08) + (col * (w * 0.09));
+                // Tighter intensity scaling for surgical precision
+                const intensityScale = isKey ? level.intensity * 1.1 : level.intensity * 0.8;
+                const size = (12 + intensityScale * 25) * zoomLevel;
+                const glowSize = size * 1.4;
 
-                const op = (0.12 + intensityScale * 0.45) * (1 - (col / 15));
+                const op = (0.08 + intensityScale * 0.25) * (1 - (col / 12));
 
                 const grad = ctx.createRadialGradient(x, y, 0, x, y, glowSize);
                 grad.addColorStop(0, `rgba(${baseColor}, ${op})`);
-                grad.addColorStop(0.5, `rgba(${baseColor}, ${op * 0.3})`);
+                grad.addColorStop(0.4, `rgba(${baseColor}, ${op * 0.2})`);
                 grad.addColorStop(1, `rgba(${baseColor}, 0)`);
 
                 ctx.fillStyle = grad;
@@ -584,34 +584,29 @@ function HeatmapCanvas({ currentPrice, liqLevels, zoomLevel, onPriceSelect }: an
                 ctx.fill();
 
                 if (col === 0) {
-                    // Central Power Core
-                    ctx.fillStyle = `rgba(${baseColor}, ${0.5 + intensityScale * 0.4})`;
+                    // Refined Power Core
+                    ctx.fillStyle = `rgba(${baseColor}, ${0.4 + intensityScale * 0.3})`;
                     ctx.beginPath();
-                    ctx.arc(x, y, size / 6, 0, Math.PI * 2);
+                    ctx.arc(x, y, size / 8, 0, Math.PI * 2);
                     ctx.fill();
 
-                    // Key Cluster Tactical UI
+                    // Surgical UI for Major Clusters
                     if (isKey) {
-                        ctx.strokeStyle = `rgba(${baseColor}, 0.6)`;
-                        ctx.lineWidth = 1;
-                        ctx.setLineDash([2, 4]);
+                        ctx.strokeStyle = `rgba(${baseColor}, 0.4)`;
+                        ctx.lineWidth = 0.5;
+                        ctx.setLineDash([1, 3]);
                         ctx.beginPath();
-                        ctx.moveTo(x + 40, y);
+                        ctx.moveTo(x + 25, y);
                         ctx.lineTo(w - 90, y);
                         ctx.stroke();
                         ctx.setLineDash([]);
 
-                        // Floating Intelligence Label
-                        ctx.fillStyle = `rgba(${baseColor}, 1)`;
-                        ctx.font = '900 8px monospace';
+                        // Subtitle Intelligence (More subtle)
+                        ctx.fillStyle = `rgba(${baseColor}, 0.8)`;
+                        ctx.font = '700 7px Inter';
                         ctx.textAlign = 'left';
-                        ctx.fillText(`KEY ${level.side.toUpperCase()} LIQ CLUSTER`, x + 25, y - 8);
-                        ctx.fillText(`${(level.intensity * 100).toFixed(0)}% STRENGTH`, x + 25, y + 14);
-
-                        // Small icon-like dot
-                        ctx.beginPath();
-                        ctx.arc(x + 18, y + 2, 2.5, 0, Math.PI * 2);
-                        ctx.fill();
+                        ctx.fillText(`${level.side.toUpperCase()} CLUSTER`, x + 18, y - 6);
+                        ctx.fillText(`${(level.intensity * 100).toFixed(0)}%`, x + 18, y + 12);
                     }
                 }
             }
