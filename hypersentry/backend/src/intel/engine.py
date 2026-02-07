@@ -6,6 +6,7 @@ from src.ws_manager import manager as ws_manager
 from .providers.rss import RSSProvider
 from .providers.twitter import TwitterProvider
 from .providers.telegram import TelegramProvider
+from .providers.polymarket import PolymarketProvider
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,8 @@ class IntelEngine:
         self.providers = [
             RSSProvider(),
             TwitterProvider(),
-            TelegramProvider()
+            TelegramProvider(),
+            PolymarketProvider()
         ]
         self.cache = set() # To prevent duplicate broadcasts
         self.recent_items = [] # To store actual items for REST access

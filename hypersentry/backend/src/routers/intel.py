@@ -52,6 +52,32 @@ async def get_intel_sources(request: Request):
     
     return [p.name for p in intel_engine.providers]
 
+@router.get("/predictions")
+async def get_prediction_markets(request: Request, query: str = None):
+    """
+    Specifically fetch prediction market data from Polymarket.
+    Part of the 'Pro' feature set for macro sentiment analysis.
+    """
+    intel_engine = getattr(request.app.state, "intel_engine", None)
+    if not intel_engine:
+        return []
+
+    # Find the Polymarket provider
+    from src.intel.providers.polymarket import PolymarketProvider
+    polymarket = next((p for p in intel_engine.providers if isinstance(p, PolymarketProvider)), None)
+    
+    if not polymarket:
+        return []
+
+    if query:
+        return await polymarket.fetch_markets_by_query(query)
+    
+    # Return what we have in the current intel cache tagged as prediction
+    if hasattr(intel_engine, "recent_items"):
+        return [item for item in intel_engine.recent_items if item.get("metadata", {}).get("type") == "prediction"]
+    
+    return []
+
 @router.get("/debate/{symbol}")
 async def get_agent_debate(symbol: str):
     """

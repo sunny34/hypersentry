@@ -37,6 +37,7 @@ const DEFAULT_TABS: TabConfig[] = [
     { id: 'twap', label: 'TWAP Intel', enabled: true },
     { id: 'pro', label: 'Pro', enabled: true },
     { id: 'lab', label: 'Lab', enabled: true },
+    { id: 'predictions', label: 'Predictions', enabled: true },
     { id: 'cohorts', label: 'Social', enabled: true },
     { id: 'news', label: 'News', enabled: true },
     { id: 'liquidations', label: 'Firehose', enabled: true },

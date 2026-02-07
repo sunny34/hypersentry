@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from 'react';
 import axios from 'axios';
-import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3, Newspaper, Menu, Sparkles, Skull, Command, Users, Activity, Loader2, Settings, Shield, Maximize2, Plus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3, Newspaper, Menu, Sparkles, Skull, Command, Users, Activity, Loader2, Settings, Shield, Maximize2, Plus, Target, ChevronLeft } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import { useAuth } from '@/contexts/AuthContext';
 import Sidebar from '@/components/Sidebar';
@@ -42,6 +42,7 @@ const CompactArbScanner = lazy(() => import('@/components/trading/CompactArbScan
 const CompactRiskSimulator = lazy(() => import('@/components/trading/CompactRiskSimulator'));
 const InstitutionalDescription = lazy(() => import('@/components/trading/InstitutionalDescription'));
 const BullBearDebate = lazy(() => import('@/components/trading/BullBearDebate'));
+const PredictionHub = lazy(() => import('@/components/trading/PredictionHub'));
 
 // Loading skeleton for lazy components
 const ComponentLoader = memo(({ height = 'h-full' }: { height?: string }) => (
@@ -94,7 +95,7 @@ function TradingTerminalContent() {
     const [tokens, setTokens] = useState<Token[]>([]);
     const [selectedToken, setSelectedToken] = useState<string>('BTC');
     const [selectedInterval, setSelectedInterval] = useState('60');
-    const [activeTab, setActiveTab] = useState<'analysis' | 'news' | 'liquidations' | 'positions' | 'orders' | 'cohorts' | 'twap' | 'pro' | 'lab'>('positions');
+    const [activeTab, setActiveTab] = useState<'analysis' | 'news' | 'liquidations' | 'positions' | 'orders' | 'cohorts' | 'twap' | 'pro' | 'lab' | 'predictions'>('positions');
     const [aiBias, setAiBias] = useState<'bullish' | 'bearish' | 'neutral'>('neutral');
     const [currentPrice, setCurrentPrice] = useState<number>(0);
     const [priceChangePercent, setPriceChangePercent] = useState<number>(0);
@@ -130,6 +131,7 @@ function TradingTerminalContent() {
             { id: 'twap', label: 'TWAP Intel', icon: Activity, color: 'text-purple-500' },
             { id: 'pro', label: 'Pro', icon: Shield, color: 'text-emerald-400' },
             { id: 'lab', label: 'Lab', icon: Activity, color: 'text-blue-400' },
+            { id: 'predictions', label: 'Predictions', icon: Target, color: 'text-purple-400' },
             { id: 'cohorts', label: 'Social', icon: Users, color: 'text-teal-400' },
             { id: 'news', label: 'News', icon: Newspaper, color: 'text-blue-300' },
             { id: 'liquidations', label: 'Firehose', icon: Skull, color: 'text-red-400' },
@@ -728,12 +730,21 @@ function TradingTerminalContent() {
                                 <div className="grid grid-cols-[280px_1fr] h-full overflow-hidden bg-black/40">
                                     {/* Strategy Portfolio Sidebar */}
                                     <div className="border-r border-white/5 bg-black/20 p-4 overflow-y-auto space-y-4">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-2">
-                                                <Settings className="w-3.5 h-3.5" />
-                                                Active Portfolio
-                                            </h3>
-                                            <span className="text-[8px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-black">2 ACTIVE</span>
+                                        <div className="flex items-center gap-3 mb-6">
+                                            <button
+                                                onClick={() => setActiveTab('positions')}
+                                                className="p-1.5 hover:bg-white/5 rounded-lg text-gray-500 hover:text-white transition-colors border border-white/5"
+                                                title="Back to Terminal"
+                                            >
+                                                <ChevronLeft className="w-3.5 h-3.5" />
+                                            </button>
+                                            <div>
+                                                <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-2">
+                                                    <Settings className="w-3.5 h-3.5" />
+                                                    Active Portfolio
+                                                </h3>
+                                                <span className="text-[8px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-black">2 ACTIVE</span>
+                                            </div>
                                         </div>
 
                                         <div className="space-y-2">
@@ -859,6 +870,10 @@ function TradingTerminalContent() {
                                             }}
                                         />
                                     </div>
+                                </div>
+                            ) : activeTab === 'predictions' ? (
+                                <div className="h-full bg-black/40 overflow-hidden">
+                                    <PredictionHub onBack={() => setActiveTab('positions')} />
                                 </div>
                             ) : (
                                 <ResizableLayout
