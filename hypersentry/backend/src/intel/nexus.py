@@ -14,7 +14,7 @@ class NexusEngine:
     def __init__(self):
         self.manager = TraderManager()
 
-    def get_alpha_confluence(self) -> List[Dict[str, Any]]:
+    async def get_alpha_confluence(self) -> List[Dict[str, Any]]:
         """
         Analyzes and correlates all intelligence sources.
         Returns a list of high-confluence 'Nexus' signals.
@@ -22,6 +22,11 @@ class NexusEngine:
         try:
             # 1. Gather Data
             intel_items = intel_engine.recent_items
+            
+            # Ensure we have fresh TWAP data
+            if not self.manager.twap_detector.active_twaps:
+                await self.manager.twap_detector.scan_once()
+                
             active_twaps = self.manager.twap_detector.get_all_tokens_summary()
             
             # Map for correlation
@@ -64,13 +69,20 @@ class NexusEngine:
             # Known major tokens for broad discovery if token_signals is small
             major_tokens = ["BTC", "ETH", "SOL", "ARB", "TIA", "PYTH", "LINK", "JUP"]
             
+            TOKEN_NAMES = {
+                "BTC": "BITCOIN",
+                "ETH": "ETHEREUM",
+                "SOL": "SOLANA",
+                "ARB": "ARBITRUM",
+                "TIA": "CELESTIA",
+                "LINK": "CHAINLINK"
+            }
+            
             # Helper for accurate keyword matching
             def is_match(token: str, text: str) -> bool:
                 token = token.upper()
                 text = text.upper()
                 # 1. Exact token match with word boundaries
-                # regex is cleaner but let's stick to simple string manipulation for speed/simplicity without importing re if not needed
-                # Actually, simple padding is robust enough for this scale
                 padded_text = f" {text} "
                 if f" {token} " in padded_text:
                     return True
@@ -78,8 +90,12 @@ class NexusEngine:
                 # 2. Check for Token/USDT or Token-USD
                 if f"{token}/" in text or f"{token}-" in text:
                     return True
+                
+                # 3. Check Full Name if available
+                full_name = TOKEN_NAMES.get(token)
+                if full_name and f" {full_name} " in padded_text:
+                    return True
 
-                # 3. Handle specific aliases map if needed (future improvement)
                 return False
 
             for pred in predictions:

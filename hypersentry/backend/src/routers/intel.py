@@ -121,7 +121,7 @@ async def get_intel_nexus(
     
     logger.info(f"Nexus request from user: {user.email if user else 'GUEST'}")
     
-    full_signals = nexus.get_alpha_confluence()
+    full_signals = await nexus.get_alpha_confluence()
     
     # 1. Pro / Admin Bypass
     if user and (user.role == "pro" or user.is_admin):
