@@ -19,32 +19,46 @@ class TraderManager:
             cls._instance.tasks: Dict[str, asyncio.Task] = {}
             cls._instance.traders: Dict[str, CopyTrader] = {}
             cls._instance.is_loading = True
-            cls._instance.alert_count = 0 # Track alerts
-            
-            # Robust Client Init
-            import time
-            from hyperliquid.utils.error import ClientError
-            for i in range(5):
-                try:
-                    cls._instance.client = HyperliquidClient()
-                    break
-                except ClientError as e:
-                    if e.status_code == 429:
-                        wait = (i + 1) * 5
-                        print(f"⚠️ Rate limited during client init. Retrying in {wait}s...")
-                        time.sleep(wait)
-                    else:
-                        raise e
-                except Exception as e:
-                     raise e
+            cls._instance.alert_count = 0 
+            cls._instance.client = None # Lazily init
             
             cls._instance.notifier = TelegramBot()
             cls._instance.db_file = "wallets.json"
-            cls._instance.twap_db_file = "twaps.json"  # Separate DB for TWAPs
+            cls._instance.twap_db_file = "twaps.json"
             cls._instance.twap_detector = TwapDetector(cls._instance.notifier)
             cls._instance.twap_task = None
             cls._instance.load_state()
         return cls._instance
+
+    def initialize_client(self):
+        """Robust Client Init (Sync for now but could be async)"""
+        if self.client:
+            return self.client
+        
+        import time
+        from hyperliquid.utils.error import ClientError
+        for i in range(3):
+            try:
+                self.client = HyperliquidClient()
+                return self.client
+            except ClientError as e:
+                if e.status_code == 429:
+                    wait = (i + 1) * 2
+                    print(f"⚠️ Rate limited during client init. Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    logger.error(f"Client init failed: {e}")
+                    break
+            except Exception as e:
+                logger.error(f"Client init exception: {e}")
+                break
+        return None
+
+    @property
+    def hl_client(self):
+        if not self.client:
+            self.initialize_client()
+        return self.client
 
     def load_state(self):
         if not os.path.exists(self.db_file):

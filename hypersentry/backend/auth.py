@@ -79,6 +79,59 @@ async def get_current_user(
         import uuid
         user_uuid = uuid.UUID(user_id)
         user = db.query(User).filter(User.id == user_uuid).first()
+        
+        if user:
+            # Institutional Admin & Pro Bypass (Update status in-memory and DB)
+            ADMIN_EMAILS = [e.lower() for e in [
+                "sunny@hypersentry.ai", 
+                "jainsunny34@gmail.com", 
+                "sunnyjain.jiet@gmail.com",
+                "admin@hypersentry.ai"
+            ]]
+            
+            PRO_EMAILS = [e.lower() for e in [
+                "pro@hypersentry.ai",
+                "trader@hypersentry.ai",
+                # Add any other institutional pro users here
+            ]]
+            
+            ADMIN_ADDRESSES = [a.lower() for a in [
+                "0xd2f4197554Af1834b87C440DCDc57c0dd8dE881A", 
+                "0x8186f2bB27352358F6F413988514936dCf80Cc29"
+            ]]
+            
+            needs_update = False
+            
+            # 1. Check Admin Status
+            is_admin_candidate = False
+            if user.email.lower() in ADMIN_EMAILS:
+                is_admin_candidate = True
+            else:
+                from models import Wallet
+                wallet_exists = db.query(Wallet).filter(
+                    Wallet.user_id == user.id,
+                    db.func.lower(Wallet.address).in_(ADMIN_ADDRESSES)
+                ).first()
+                if wallet_exists:
+                    is_admin_candidate = True
+            
+            if is_admin_candidate and not user.is_admin:
+                user.is_admin = True
+                needs_update = True
+                logger.info(f"🛡️ User {user.email} promoted to ADMIN status.")
+
+            # 2. Check Pro Status (Admins are always PRO)
+            is_pro_candidate = is_admin_candidate or (user.email.lower() in PRO_EMAILS)
+            
+            if is_pro_candidate and user.role != "pro":
+                user.role = "pro"
+                needs_update = True
+                logger.info(f"💎 User {user.email} promoted to PRO status.")
+
+            if needs_update:
+                db.commit()
+                db.refresh(user)
+                
         return user
     except (ValueError, TypeError):
         logger.warning(f"Invalid UUID in token: {user_id}")
@@ -99,6 +152,37 @@ async def require_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+async def require_pro_user(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    FastAPI dependency that REQUIRES 'pro' role.
+    Raises 403 if authenticated but not pro.
+    Bypasses for admins.
+    """
+    # 1. Admin Bypass (populated by get_current_user)
+    if user.is_admin:
+        return user
+    
+    if user.role != "pro":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="PRO Subscription Required for this Access Level."
+        )
+    return user
+
+def reset_user_credits_if_needed(user: Optional[User], db: Session):
+    """Resets daily credits if 24h have passed since last reset."""
+    if not user:
+        return
+    now = datetime.now(user.last_credit_reset.tzinfo)
+    if now > user.last_credit_reset + timedelta(days=1):
+        user.trial_credits = 5
+        user.last_credit_reset = now
+        db.commit()
 
 
 async def exchange_google_code(code: str, redirect_uri: str) -> dict:

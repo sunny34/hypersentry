@@ -3,7 +3,7 @@ Database models for HyperliquidSentry
 Using SQLAlchemy ORM with PostgreSQL
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -24,6 +24,10 @@ class User(Base):
     telegram_chat_id = Column(String(255), nullable=True)  # User's personal TG Chat ID
     provider = Column(String(50), nullable=False)  # 'google' or 'twitter'
     provider_id = Column(String(255), nullable=False)
+    role = Column(String(50), default="user", nullable=False) # 'user' or 'pro'
+    is_admin = Column(Boolean, default=False)
+    trial_credits = Column(Integer, default=5)
+    last_credit_reset = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -39,6 +43,9 @@ class User(Base):
             "avatar_url": self.avatar_url,
             "telegram_chat_id": self.telegram_chat_id,
             "provider": self.provider,
+            "role": self.role,
+            "is_admin": bool(self.is_admin),
+            "trial_credits": self.trial_credits,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 

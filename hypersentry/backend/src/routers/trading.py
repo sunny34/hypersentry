@@ -228,11 +228,13 @@ async def get_active_trades(
     user: User = Depends(require_user),
     db: Session = Depends(get_db)
 ):
-    """Fetch active arbitrage trades with live PnL."""
-    trades = db.query(ActiveTrade).filter(
-        ActiveTrade.user_id == user.id,
-        ActiveTrade.status == "OPEN"
-    ).order_by(ActiveTrade.entry_time.desc()).all()
+    """Fetch active arbitrage trades with live PnL (Admins see all)."""
+    query = db.query(ActiveTrade).filter(ActiveTrade.status == "OPEN")
+    
+    if not user.is_admin:
+        query = query.filter(ActiveTrade.user_id == user.id)
+        
+    trades = query.order_by(ActiveTrade.entry_time.desc()).all()
     
     if not trades:
         return {"trades": []}

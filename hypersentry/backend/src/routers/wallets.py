@@ -10,8 +10,11 @@ router = APIRouter(prefix="/wallets", tags=["Wallets"])
 
 @router.get("")
 def list_wallets(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """List current user's wallets only."""
-    wallets = db.query(Wallet).filter(Wallet.user_id == user.id).all()
+    """List current user's wallets (Admins see all)."""
+    if user.is_admin:
+        wallets = db.query(Wallet).all()
+    else:
+        wallets = db.query(Wallet).filter(Wallet.user_id == user.id).all()
     return {"wallets": [w.to_dict() for w in wallets]}
 
 

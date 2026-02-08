@@ -88,6 +88,24 @@ npm install
 npm run dev
 ```
 
+## 🗄️ Database Migrations
+
+HyperSentry uses **Alembic** for institutional-grade database versioning. Always use migrations instead of direct schema changes.
+
+### Running Migrations
+Sync your database with the latest terminal schema:
+```bash
+cd backend
+venv/bin/python3 -m alembic upgrade head
+```
+
+### Creating New Migrations
+After modifying `models.py`, generate a traceable evolution script:
+```bash
+cd backend
+venv/bin/python3 -m alembic revision --autogenerate -m "describe your changes"
+```
+
 ## ⚙️ Configuration
 
 ### Environment Variables

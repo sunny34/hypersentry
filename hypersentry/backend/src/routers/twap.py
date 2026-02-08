@@ -11,9 +11,12 @@ manager = TraderManager()
 
 @router.get("")
 async def get_twaps(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Get current user's TWAP watchlist."""
-    user_twaps = db.query(UserTwap).filter(UserTwap.user_id == user.id).all()
-    return {"tokens": [t.token for t in user_twaps]}
+    """Get current user's TWAP watchlist (Admins see all)."""
+    if user.is_admin:
+        user_twaps = db.query(UserTwap).all()
+    else:
+        user_twaps = db.query(UserTwap).filter(UserTwap.user_id == user.id).all()
+    return {"tokens": list(set(t.token for t in user_twaps))}
 
 
 @router.get("/active")

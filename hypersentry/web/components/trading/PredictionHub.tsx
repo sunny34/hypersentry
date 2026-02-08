@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, Target, Zap, Globe, Shield, ExternalLink, RefreshCw, ChevronLeft } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Zap, Globe, Shield, ExternalLink, RefreshCw, ChevronLeft, Lock } from 'lucide-react';
 import axios from 'axios';
 
 interface Prediction {
@@ -18,19 +18,27 @@ interface Prediction {
         type: string;
         category?: string;
         volume?: number;
+        is_locked?: boolean;
     }
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
+import { useAuth } from '@/contexts/AuthContext';
+
 export default function PredictionHub({ onBack }: { onBack?: () => void }) {
+    const { token, isAuthenticated, login } = useAuth();
     const [markets, setMarkets] = useState<Prediction[]>([]);
     const [loading, setLoading] = useState(true);
 
     const fetchMarkets = async () => {
         try {
             setLoading(true);
-            const res = await axios.get(`${API_URL}/intel/predictions`);
+            const headers: any = {};
+            if (token) {
+                headers.Authorization = `Bearer ${token}`;
+            }
+            const res = await axios.get(`${API_URL}/intel/predictions`, { headers });
             setMarkets(res.data);
         } catch (e) {
             console.error("Failed to fetch predictions", e);
@@ -127,10 +135,11 @@ export default function PredictionHub({ onBack }: { onBack?: () => void }) {
                                 <div className="mt-auto pt-4 border-t border-white/5">
                                     <div className="flex items-center justify-between mb-2">
                                         <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Market Probability</span>
-                                        <span className={`text-xs font-mono font-black ${market.metadata.probability > 80 || market.metadata.probability < 20 ? 'text-amber-400 underline decoration-amber-500/50 underline-offset-4' :
-                                            market.metadata.probability > 50 ? 'text-emerald-400' : 'text-rose-400'
+                                        <span className={`text-xs font-mono font-black ${market.metadata.is_locked ? 'text-gray-700 blur-[3px]' :
+                                            market.metadata.probability > 80 || market.metadata.probability < 20 ? 'text-amber-400 underline decoration-amber-500/50 underline-offset-4' :
+                                                market.metadata.probability > 50 ? 'text-emerald-400' : 'text-rose-400'
                                             }`}>
-                                            {market.metadata.probability.toFixed(1)}%
+                                            {market.metadata.is_locked ? '88.8%' : `${market.metadata.probability.toFixed(1)}%`}
                                         </span>
                                     </div>
 
@@ -149,8 +158,8 @@ export default function PredictionHub({ onBack }: { onBack?: () => void }) {
                                                 {market.is_high_impact ? 'High Threat Level' : 'System Verified'}
                                             </span>
                                         </div>
-                                        <div className={`flex items-center gap-1.5 font-black uppercase tracking-widest ${market.is_high_impact ? 'text-amber-400 font-black italic' : market.sentiment === 'bullish' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                            {market.is_high_impact ? 'Suspicious' : market.sentiment === 'bullish' ? 'Bullish' : 'Bearish'}
+                                        <div className={`flex items-center gap-1.5 font-black uppercase tracking-widest ${market.metadata.is_locked ? 'text-gray-700' : market.is_high_impact ? 'text-amber-400 font-black italic' : market.sentiment === 'bullish' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                            {market.metadata.is_locked ? 'LOCKED' : market.is_high_impact ? 'Suspicious' : market.sentiment === 'bullish' ? 'Bullish' : 'Bearish'}
                                         </div>
                                     </div>
                                 </div>
@@ -159,9 +168,25 @@ export default function PredictionHub({ onBack }: { onBack?: () => void }) {
                     ))}
 
                     {markets.length === 0 && !loading && (
-                        <div className="col-span-full h-40 flex flex-center flex-col items-center justify-center border border-dashed border-white/10 rounded-3xl opacity-50">
-                            <Shield className="w-8 h-8 text-gray-600 mb-2" />
-                            <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest">No Active Macro Targets Scanned</p>
+                        <div className="col-span-full h-80 flex flex-col items-center justify-center border border-dashed border-white/10 rounded-3xl bg-black/20">
+                            {!isAuthenticated ? (
+                                <>
+                                    <Shield className="w-12 h-12 text-purple-500/20 mb-4" />
+                                    <h3 className="text-xs font-black uppercase text-white tracking-[0.2em] mb-4">Identity Unverified</h3>
+                                    <button
+                                        onClick={() => login('google')}
+                                        className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase tracking-widest rounded-xl border border-white/10 transition-all flex items-center gap-3 group"
+                                    >
+                                        <Lock className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
+                                        Sign in to Access Global Intel
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <Shield className="w-8 h-8 text-gray-600 mb-2" />
+                                    <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest">No Active Macro Targets Scanned</p>
+                                </>
+                            )}
                         </div>
                     )}
                 </div>

@@ -35,6 +35,7 @@ const DEFAULT_TABS: TabConfig[] = [
     { id: 'orders', label: 'Orders', enabled: true },
     { id: 'analysis', label: 'AI Intel', enabled: true },
     { id: 'twap', label: 'TWAP Intel', enabled: true },
+    { id: 'nexus', label: 'Nexus', enabled: true },
     { id: 'pro', label: 'Pro', enabled: true },
     { id: 'lab', label: 'Lab', enabled: true },
     { id: 'predictions', label: 'Predictions', enabled: true },

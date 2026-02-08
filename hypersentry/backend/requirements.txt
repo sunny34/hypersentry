@@ -59,6 +59,7 @@ pyparsing
 python-dotenv
 python-telegram-bot
 regex
+python-dateutil
 requests
 rlp
 toolz
@@ -77,6 +78,7 @@ redis
 
 # Database ORM
 sqlalchemy
+alembic
 psycopg2-binary
 
 # JWT Authentication

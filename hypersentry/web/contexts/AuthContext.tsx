@@ -12,6 +12,9 @@ interface User {
     avatar_url?: string;
     telegram_chat_id?: string;
     provider: string;
+    role: 'user' | 'pro';
+    is_admin?: boolean;
+    trial_credits?: number;
     created_at: string;
     wallets?: { address: string }[];
 }
