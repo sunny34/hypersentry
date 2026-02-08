@@ -879,7 +879,10 @@ function TradingTerminalContent() {
                                                 ) : activeTab === 'news' ? (
                                                     <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
                                                 ) : (activeTab as any) === 'nexus' ? (
-                                                    <DecisionNexus />
+                                                    <DecisionNexus onSelectToken={(t) => {
+                                                        setSelectedToken(t);
+                                                        setIsHubMaximized(false);
+                                                    }} />
                                                 ) : (activeTab as any) === 'predictions' ? (
                                                     <PredictionHub />
                                                 ) : (
@@ -959,7 +962,10 @@ function TradingTerminalContent() {
                                                     ) : activeTab === 'news' ? (
                                                         <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
                                                     ) : (activeTab as any) === 'nexus' ? (
-                                                        <DecisionNexus />
+                                                        <DecisionNexus onSelectToken={(t) => {
+                                                            setSelectedToken(t);
+                                                            setIsHubMaximized(false);
+                                                        }} />
                                                     ) : (activeTab as any) === 'predictions' ? (
                                                         <PredictionHub />
                                                     ) : activeTab === 'liquidations' ? (

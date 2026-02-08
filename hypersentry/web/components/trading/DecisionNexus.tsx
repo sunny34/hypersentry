@@ -37,7 +37,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
-export default function DecisionNexus({ onBack }: { onBack?: () => void }) {
+export default function DecisionNexus({ onBack, onSelectToken }: { onBack?: () => void; onSelectToken?: (token: string) => void }) {
     const { user, token, isAuthenticated, login } = useAuth();
     const [signals, setSignals] = useState<NexusSignal[]>([]);
     const [loading, setLoading] = useState(true);
@@ -254,9 +254,34 @@ export default function DecisionNexus({ onBack }: { onBack?: () => void }) {
 
                                 {/* Hotlinks */}
                                 <div className="mt-6 flex gap-2">
-                                    <button className="flex-1 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded-lg transition-colors flex items-center justify-center gap-2 group/btn">
+                                    <button
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (sig.is_obfuscated) {
+                                                if (!isAuthenticated) {
+                                                    login('google');
+                                                } else {
+                                                    // Trigger de-obfuscation
+                                                    try {
+                                                        const res = await axios.post(`${API_URL}/intel/deobfuscate`,
+                                                            { token_obfuscated: sig.token },
+                                                            { headers: { Authorization: `Bearer ${token}` } }
+                                                        );
+                                                        setSignals(res.data);
+                                                    } catch (err: any) {
+                                                        alert(err.response?.data?.detail || "Reveal failed");
+                                                    }
+                                                }
+                                                return;
+                                            }
+                                            if (onSelectToken) {
+                                                onSelectToken(sig.token);
+                                            }
+                                        }}
+                                        className="flex-1 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded-lg transition-colors flex items-center justify-center gap-2 group/btn"
+                                    >
                                         <Zap className="w-3 h-3 group-hover/btn:animate-pulse" />
-                                        Instant Position
+                                        {sig.is_obfuscated ? (isAuthenticated ? 'Unlock to Trade' : 'Sign in to Trade') : 'Instant Position'}
                                     </button>
                                     <button className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 rounded-lg transition-colors">
                                         <Shield className="w-3 h-3" />
