@@ -739,7 +739,14 @@ function TradingTerminalContent() {
                                 if (activeTab === 'nexus') {
                                     return (
                                         <div className="h-full bg-black/40 overflow-hidden">
-                                            <DecisionNexus onBack={() => setActiveTab('positions')} />
+                                            <DecisionNexus
+                                                onBack={() => setActiveTab('positions')}
+                                                onSelectToken={(t) => {
+                                                    setSelectedToken(t);
+                                                    setActiveTab('positions');
+                                                    setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
+                                                }}
+                                            />
                                         </div>
                                     );
                                 }
