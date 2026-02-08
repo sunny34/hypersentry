@@ -7,6 +7,7 @@ from .providers.rss import RSSProvider
 from .providers.twitter import TwitterProvider
 from .providers.telegram import TelegramProvider
 from .providers.polymarket import PolymarketProvider
+from .sentiment import SentimentAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class IntelEngine:
             TelegramProvider(),
             PolymarketProvider()
         ]
+        self.sentiment_analyzer = SentimentAnalyzer()
         self.cache = set() # To prevent duplicate broadcasts
         self.recent_items = [] # To store actual items for REST access
         self.is_running = False
@@ -52,6 +54,10 @@ class IntelEngine:
 
                 # Broadcast new intelligence
                 if new_items:
+                    # 🚀 Perform Deep Sentiment Analysis (Step 4)
+                    logger.info("🧠 Analyzing sentiment with Gemini 1.5 Flash...")
+                    await self.sentiment_analyzer.analyze_batch(new_items)
+
                     # Sort by timestamp
                     new_items.sort(key=lambda x: x["timestamp"], reverse=True)
                     
