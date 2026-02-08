@@ -21,6 +21,7 @@ interface NewsItem {
     reco: 'long' | 'short' | 'neutral';
     confidence: number;
     isHighImpact: boolean;
+    isAiVerified?: boolean;
 }
 
 interface NewsFeedProps {
@@ -77,10 +78,11 @@ export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMa
                         url: item.url,
                         source: item.source || 'Intel',
                         published: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                        sentiment: item.sentiment || 'neutral',
-                        reco: item.sentiment === 'positive' ? 'long' : item.sentiment === 'negative' ? 'short' : 'neutral',
-                        confidence: item.confidence || 50,
-                        isHighImpact: item.isHighImpact || false
+                        sentiment: item.sentiment === 'bullish' ? 'positive' : item.sentiment === 'bearish' ? 'negative' : 'neutral',
+                        reco: (item.sentiment === 'positive' || item.sentiment === 'bullish') ? 'long' : (item.sentiment === 'negative' || item.sentiment === 'bearish') ? 'short' : 'neutral',
+                        confidence: item.sentiment_score ? Math.abs(item.sentiment_score * 100) : (item.confidence || 85),
+                        isHighImpact: item.isHighImpact || false,
+                        isAiVerified: true
                     }));
                 }
             } catch (e) {
@@ -436,6 +438,12 @@ export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMa
 
                                 <div className="flex items-center gap-2 min-w-0">
                                     <span className={`${density === 'compact' ? 'text-[7px]' : 'text-[8px]'} text-gray-500 font-mono font-bold shrink-0 uppercase`}>{item.published}</span>
+                                    {item.isAiVerified && (
+                                        <div className="flex items-center gap-0.5 px-1 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded">
+                                            <Zap className="w-2 h-2 text-blue-400 fill-current" />
+                                            <span className="text-[6px] font-black text-blue-400 uppercase tracking-tighter">AI</span>
+                                        </div>
+                                    )}
                                     <a
                                         href={item.url}
                                         target="_blank"
