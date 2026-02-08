@@ -881,6 +881,7 @@ function TradingTerminalContent() {
                                                 ) : (activeTab as any) === 'nexus' ? (
                                                     <DecisionNexus onSelectToken={(t) => {
                                                         setSelectedToken(t);
+                                                        setActiveTab('positions');
                                                         setIsHubMaximized(false);
                                                     }} />
                                                 ) : (activeTab as any) === 'predictions' ? (
@@ -964,6 +965,7 @@ function TradingTerminalContent() {
                                                     ) : (activeTab as any) === 'nexus' ? (
                                                         <DecisionNexus onSelectToken={(t) => {
                                                             setSelectedToken(t);
+                                                            setActiveTab('positions');
                                                             setIsHubMaximized(false);
                                                         }} />
                                                     ) : (activeTab as any) === 'predictions' ? (
