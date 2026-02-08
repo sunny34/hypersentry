@@ -1,9 +1,4 @@
-"""
-Database models for HyperliquidSentry
-Using SQLAlchemy ORM with PostgreSQL
-"""
-
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Integer
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Integer, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -137,3 +132,39 @@ class ActiveTrade(Base):
     user = relationship("User", back_populates="trades")
 
 User.trades = relationship("ActiveTrade", back_populates="user", cascade="all, delete-orphan")
+
+
+class IntelItem(Base):
+    """Stores intelligence items (News, Predictions) for persistence."""
+    __tablename__ = 'intel_items'
+
+    id = Column(String(255), primary_key=True) # Using source ID (url/guid) as primary key
+    source_type = Column(String(50), nullable=False) # 'rss', 'twitter', 'polymarket'
+    title = Column(Text, nullable=False)
+    content = Column(Text, nullable=True)
+    url = Column(Text, nullable=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False)
+    
+    # Analysis fields
+    sentiment = Column(String(20), default="neutral") # bullish, bearish, neutral
+    sentiment_score = Column(Float, default=0.0)
+    is_high_impact = Column(Boolean, default=False)
+    
+    # Metadata (e.g. probability for predictions)
+    metadata_json = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "source": self.source_type, # mapping back to 'source' key used in frontend
+            "title": self.title,
+            "content": self.content,
+            "url": self.url,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "sentiment": self.sentiment,
+            "sentiment_score": self.sentiment_score,
+            "is_high_impact": self.is_high_impact,
+            "metadata": self.metadata_json or {}
+        }
