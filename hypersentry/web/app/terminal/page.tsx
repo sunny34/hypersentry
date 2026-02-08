@@ -883,6 +883,7 @@ function TradingTerminalContent() {
                                                         setSelectedToken(t);
                                                         setActiveTab('positions');
                                                         setIsHubMaximized(false);
+                                                        setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
                                                     }} />
                                                 ) : (activeTab as any) === 'predictions' ? (
                                                     <PredictionHub />
@@ -967,6 +968,7 @@ function TradingTerminalContent() {
                                                             setSelectedToken(t);
                                                             setActiveTab('positions');
                                                             setIsHubMaximized(false);
+                                                            setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
                                                         }} />
                                                     ) : (activeTab as any) === 'predictions' ? (
                                                         <PredictionHub />

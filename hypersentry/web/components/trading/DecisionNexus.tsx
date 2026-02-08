@@ -257,11 +257,14 @@ export default function DecisionNexus({ onBack, onSelectToken }: { onBack?: () =
                                     <button
                                         onClick={async (e) => {
                                             e.stopPropagation();
+                                            console.log('[Nexus] Instant Position clicked', { sig, isAuthenticated, hasHandler: !!onSelectToken });
                                             if (sig.is_obfuscated) {
                                                 if (!isAuthenticated) {
+                                                    console.log('[Nexus] Triggering login');
                                                     login('google');
                                                 } else {
                                                     // Trigger de-obfuscation
+                                                    console.log('[Nexus] Triggering de-obfuscation for', sig.token);
                                                     try {
                                                         const res = await axios.post(`${API_URL}/intel/deobfuscate`,
                                                             { token_obfuscated: sig.token },
@@ -275,7 +278,10 @@ export default function DecisionNexus({ onBack, onSelectToken }: { onBack?: () =
                                                 return;
                                             }
                                             if (onSelectToken) {
+                                                console.log('[Nexus] Calling onSelectToken with', sig.token);
                                                 onSelectToken(sig.token);
+                                            } else {
+                                                console.warn('[Nexus] onSelectToken prop is missing!');
                                             }
                                         }}
                                         className="flex-1 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded-lg transition-colors flex items-center justify-center gap-2 group/btn"
