@@ -746,6 +746,10 @@ function TradingTerminalContent() {
                                                     setActiveTab('positions');
                                                     setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
                                                 }}
+                                                onTabChange={(tab, t) => {
+                                                    setSelectedToken(t);
+                                                    setActiveTab(tab as any);
+                                                }}
                                             />
                                         </div>
                                     );
@@ -891,7 +895,12 @@ function TradingTerminalContent() {
                                                         setActiveTab('positions');
                                                         setIsHubMaximized(false);
                                                         setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
-                                                    }} />
+                                                    }}
+                                                        onTabChange={(tab, t) => {
+                                                            setSelectedToken(t);
+                                                            setActiveTab(tab as any);
+                                                            setIsHubMaximized(false);
+                                                        }} />
                                                 ) : (activeTab as any) === 'predictions' ? (
                                                     <PredictionHub />
                                                 ) : (
@@ -976,7 +985,12 @@ function TradingTerminalContent() {
                                                             setActiveTab('positions');
                                                             setIsHubMaximized(false);
                                                             setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
-                                                        }} />
+                                                        }}
+                                                            onTabChange={(tab, t) => {
+                                                                setSelectedToken(t);
+                                                                setActiveTab(tab as any);
+                                                                setIsHubMaximized(false);
+                                                            }} />
                                                     ) : (activeTab as any) === 'predictions' ? (
                                                         <PredictionHub />
                                                     ) : activeTab === 'liquidations' ? (

@@ -37,7 +37,11 @@ import { useAuth } from '@/contexts/AuthContext';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
-export default function DecisionNexus({ onBack, onSelectToken }: { onBack?: () => void; onSelectToken?: (token: string) => void }) {
+export default function DecisionNexus({ onBack, onSelectToken, onTabChange }: {
+    onBack?: () => void;
+    onSelectToken?: (token: string) => void;
+    onTabChange?: (tab: string, token: string) => void;
+}) {
     const { user, token, isAuthenticated, login } = useAuth();
     const [signals, setSignals] = useState<NexusSignal[]>([]);
     const [loading, setLoading] = useState(true);
@@ -208,10 +212,14 @@ export default function DecisionNexus({ onBack, onSelectToken }: { onBack?: () =
                                 {/* Bottom: Data Silo Previews */}
                                 <div className="space-y-4 mt-auto">
                                     {/* Order Flow */}
-                                    <div className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
+                                    <div
+                                        onClick={() => onTabChange && onTabChange('twap', sig.token)}
+                                        className={`p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl transition-all ${onTabChange ? 'cursor-pointer hover:bg-blue-500/10 hover:border-blue-500/30' : ''}`}
+                                    >
                                         <div className="flex items-center justify-between mb-2">
                                             <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
                                                 <Activity className="w-3 h-3" /> Whale Order Flow
+                                                {onTabChange && <ExternalLink className="w-2 h-2 opacity-50" />}
                                             </span>
                                             <span className="text-[10px] text-gray-400">{sig.signals?.twap?.active_count || 0} Active TWAPs</span>
                                         </div>
@@ -225,10 +233,14 @@ export default function DecisionNexus({ onBack, onSelectToken }: { onBack?: () =
 
                                     {/* Predictions */}
                                     {sig.signals?.prediction && (
-                                        <div className="p-3 bg-purple-500/5 border border-purple-500/10 rounded-xl">
+                                        <div
+                                            onClick={() => onTabChange && onTabChange('predictions', sig.token)}
+                                            className={`p-3 bg-purple-500/5 border border-purple-500/10 rounded-xl transition-all ${onTabChange ? 'cursor-pointer hover:bg-purple-500/10 hover:border-purple-500/30' : ''}`}
+                                        >
                                             <div className="flex items-center justify-between mb-1">
                                                 <span className="text-[9px] font-black text-purple-400 uppercase tracking-widest flex items-center gap-1.5">
                                                     <Target className="w-3 h-3" /> Decentralized Wisdom
+                                                    {onTabChange && <ExternalLink className="w-2 h-2 opacity-50" />}
                                                 </span>
                                                 <span className="text-[10px] font-black text-purple-400">{sig.signals?.prediction?.metadata?.probability}% YES</span>
                                             </div>
@@ -238,10 +250,14 @@ export default function DecisionNexus({ onBack, onSelectToken }: { onBack?: () =
 
                                     {/* News Confluence */}
                                     {sig.signals?.news && sig.signals?.news?.length > 0 && (
-                                        <div className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl">
+                                        <div
+                                            onClick={() => onTabChange && onTabChange('news', sig.token)}
+                                            className={`p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl transition-all ${onTabChange ? 'cursor-pointer hover:bg-amber-500/10 hover:border-amber-500/30' : ''}`}
+                                        >
                                             <div className="flex items-center justify-between mb-1">
                                                 <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
                                                     <Activity className="w-3 h-3" /> Latest News Impact
+                                                    {onTabChange && <ExternalLink className="w-2 h-2 opacity-50" />}
                                                 </span>
                                                 {sig.signals?.news[0]?.is_high_impact && (
                                                     <span className="text-[8px] bg-rose-500 text-black px-1 rounded animate-pulse font-black uppercase tracking-tighter">VOLATILITY ALERT</span>

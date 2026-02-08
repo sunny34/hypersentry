@@ -64,17 +64,31 @@ class NexusEngine:
             # Known major tokens for broad discovery if token_signals is small
             major_tokens = ["BTC", "ETH", "SOL", "ARB", "TIA", "PYTH", "LINK", "JUP"]
             
+            # Helper for accurate keyword matching
+            def is_match(token: str, text: str) -> bool:
+                token = token.upper()
+                text = text.upper()
+                # 1. Exact token match with word boundaries
+                # regex is cleaner but let's stick to simple string manipulation for speed/simplicity without importing re if not needed
+                # Actually, simple padding is robust enough for this scale
+                padded_text = f" {text} "
+                if f" {token} " in padded_text:
+                    return True
+                
+                # 2. Check for Token/USDT or Token-USD
+                if f"{token}/" in text or f"{token}-" in text:
+                    return True
+
+                # 3. Handle specific aliases map if needed (future improvement)
+                return False
+
             for pred in predictions:
-                title = pred.get("title", "").upper()
+                title = pred.get("title", "")
                 matched_token = None
                 
                 # Check current signals first
                 for t in list(token_signals.keys()) + major_tokens:
-                    if len(t) <= 2:
-                        if f" {t} " in f" {title} " or title.startswith(f"{t} ") or title.endswith(f" {t}"):
-                            matched_token = t
-                            break
-                    elif t in title:
+                    if is_match(t, title):
                         matched_token = t
                         break
                 
@@ -96,16 +110,12 @@ class NexusEngine:
             # 4. Process News (Anchor/Correlate)
             news = [i for i in intel_items if i.get("metadata", {}).get("type") != "prediction"]
             for item in news:
-                title_content = item.get("title", "").upper()
-                content = item.get("content", "").upper() + " " + title_content
+                title = item.get("title", "")
+                content = item.get("content", "") + " " + title
                 matched_token = None
                 
                 for t in list(token_signals.keys()) + major_tokens:
-                    if len(t) <= 2:
-                        if f" {t} " in f" {content} " or content.startswith(f"{t} ") or content.endswith(f" {t}"):
-                            matched_token = t
-                            break
-                    elif t in content:
+                    if is_match(t, content):
                         matched_token = t
                         break
                 
