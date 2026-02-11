@@ -22,6 +22,7 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider } from 'wagmi';
 import { ThemeProvider } from '../contexts/ThemeContext';
+import { TerminalSettingsProvider } from '../contexts/TerminalSettingsContext';
 import '@rainbow-me/rainbowkit/styles.css';
 
 const config = getDefaultConfig({
@@ -80,7 +81,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <QueryClientProvider client={queryClient}>
                 <RainbowKitProvider theme={darkTheme()} coolMode>
                     <ThemeProvider>
-                        {mounted && children}
+                        <TerminalSettingsProvider>
+                            {mounted && children}
+                        </TerminalSettingsProvider>
                     </ThemeProvider>
                 </RainbowKitProvider>
             </QueryClientProvider>

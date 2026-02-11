@@ -168,3 +168,29 @@ class IntelItem(Base):
             "is_high_impact": self.is_high_impact,
             "metadata": self.metadata_json or {}
         }
+
+
+class MicrostructureSnapshot(Base):
+    """Stores high-fidelity market microstructure metrics (CVD, Premium) over time."""
+    __tablename__ = 'microstructure_snapshots'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, index=True) # e.g. BTC
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    
+    # Core Metrics
+    price = Column(Float, nullable=False)
+    cvd_total = Column(Float, nullable=False) # Aggregate CVD (Binance Spot mostly)
+    
+    # Premium / Basis
+    premium_usd = Column(Float, default=0.0) # Coinbase Price - Binance Price
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def to_dict(self):
+        return {
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "cvd": self.cvd_total,
+            "spread_usd": self.premium_usd,
+            "price": self.price
+        }

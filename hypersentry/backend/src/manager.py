@@ -7,6 +7,7 @@ from src.client_wrapper import HyperliquidClient
 from src.notifications import TelegramBot
 from src.strategies.copy_trader import CopyTrader
 from src.strategies.twap_detector import TwapDetector
+from src.strategies.passive_wall_detector import PassiveWallDetector
 
 logger = logging.getLogger("TraderManager")
 
@@ -26,7 +27,9 @@ class TraderManager:
             cls._instance.db_file = "wallets.json"
             cls._instance.twap_db_file = "twaps.json"
             cls._instance.twap_detector = TwapDetector(cls._instance.notifier)
+            cls._instance.passive_walls = PassiveWallDetector()
             cls._instance.twap_task = None
+            cls._instance.passive_task = None
             cls._instance.load_state()
         return cls._instance
 
@@ -149,6 +152,9 @@ class TraderManager:
         if not self.twap_task:
             self.twap_task = asyncio.create_task(self.twap_detector.start())
         
+        if not self.passive_task:
+            self.passive_task = asyncio.create_task(self.passive_walls.start())
+        
         self.is_loading = False
         logger.info("✅ Restore complete.")
 
@@ -240,6 +246,11 @@ class TraderManager:
         self.twap_detector.is_running = False
         if self.twap_task:
             self.twap_task.cancel()
+        
+        # Stop Passive Wall Detector
+        self.passive_walls.is_running = False
+        if self.passive_task:
+            self.passive_task.cancel()
         
         targets = list(self.tasks.keys())
         for t in targets:

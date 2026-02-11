@@ -446,7 +446,23 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .glow-orange {
-    box-shadow: 0 0 15px rgba(249, 115, 22, 0.4);
+    box-shadow: 0 0 15px rgba(251, 191, 36, 0.2);
+}
+
+@keyframes bounce-subtle {
+
+    0%,
+    100% {
+        transform: translateY(-50%) translateX(0);
+    }
+
+    50% {
+        transform: translateY(-50%) translateX(5px);
+    }
+}
+
+.animate-bounce-subtle {
+    animation: bounce-subtle 3s ease-in-out infinite;
 }
 
 .glow-red {

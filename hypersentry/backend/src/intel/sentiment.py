@@ -1,4 +1,4 @@
-import google.generativeai as genai
+from google import genai
 import logging
 import os
 import asyncio
@@ -15,23 +15,23 @@ class SentimentAnalyzer:
         self.api_key = os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             logger.warning("GEMINI_API_KEY not found. Sentiment analysis will be skipped.")
-            self.model = None
+            self.client = None
         else:
             try:
-                genai.configure(api_key=self.api_key)
-                # Use the fast and cheap 1.5-flash model for high throughput
-                self.model = genai.GenerativeModel('gemini-1.5-flash')
-                logger.info("✅ Gemini 1.5 Flash initialized for sentiment analysis.")
+                # Initialize the new Google GenAI client
+                self.client = genai.Client(api_key=self.api_key)
+                self.model_id = 'gemini-1.5-flash'
+                logger.info("✅ Gemini 1.5 Flash initialized via google-genai SDK.")
             except Exception as e:
-                logger.error(f"Failed to initialize Gemini: {e}")
-                self.model = None
+                logger.error(f"Failed to initialize Gemini Client: {e}")
+                self.client = None
 
     async def analyze_batch(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Analyzes a batch of news items in parallel.
         Modifies the items in-place with 'sentiment' and 'sentiment_score'.
         """
-        if not self.model or not items:
+        if not self.client or not items:
             return items
 
         # Only process items that are currently 'neutral' (default from providers)
@@ -71,10 +71,13 @@ class SentimentAnalyzer:
             - General updates, education -> NEUTRAL
             """
             
-            # Use run_in_executor for the blocking API call
+            # Use the new client to generate content
             response = await asyncio.get_event_loop().run_in_executor(
                 None, 
-                lambda: self.model.generate_content(prompt)
+                lambda: self.client.models.generate_content(
+                    model=self.model_id,
+                    contents=prompt
+                )
             )
             
             sentiment_raw = response.text.strip().upper()

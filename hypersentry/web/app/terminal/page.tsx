@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from 'react';
 import axios from 'axios';
+import { AnimatePresence } from 'framer-motion';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, BarChart3, Newspaper, Menu, Sparkles, Skull, Command, Users, Activity, Loader2, Settings, Shield, Maximize2, Plus, Target, ChevronLeft, Lock } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import { useAuth } from '@/contexts/AuthContext';
@@ -44,6 +45,7 @@ const InstitutionalDescription = lazy(() => import('@/components/trading/Institu
 const BullBearDebate = lazy(() => import('@/components/trading/BullBearDebate'));
 const PredictionHub = lazy(() => import('@/components/trading/PredictionHub'));
 const DecisionNexus = lazy(() => import('@/components/trading/DecisionNexus'));
+const MicrostructureHUD = lazy(() => import('@/components/trading/MicrostructureHUD'));
 
 // Loading skeleton for lazy components
 const ComponentLoader = memo(({ height = 'h-full' }: { height?: string }) => (
@@ -191,6 +193,8 @@ function TradingTerminalContent() {
     const [showCloseModal, setShowCloseModal] = useState(false);
     const [selectedPositionToClose, setSelectedPositionToClose] = useState<any>(null);
     const [isHubMaximized, setIsHubMaximized] = useState(false);
+    const [showMicrostructure, setShowMicrostructure] = useState(false);
+    const [isHudMinimized, setIsHudMinimized] = useState(false);
 
     const activeTabs = useMemo(() => {
         const allTabs = [
@@ -228,12 +232,27 @@ function TradingTerminalContent() {
     const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set(['EMA 50', 'EMA 200', 'Supertrend']));
     const [showIndicatorMenu, setShowIndicatorMenu] = useState(false);
 
-    const toggleIndicator = (name: string) => {
-        const next = new Set(activeIndicators);
-        if (next.has(name)) next.delete(name);
-        else next.add(name);
-        setActiveIndicators(next);
-    };
+    const toggleIndicator = useCallback((indicator: string) => {
+        if (indicator === 'HUD_MINIMIZE') {
+            setIsHudMinimized(prev => !prev);
+            // If closed, open it and force minimize state (or allow toggle to handle both?)
+            // If the user clicks minimize, they expect it to minimize. If it's closed, maybe open it minimized?
+            // Simpler: if closed, just open it (unminimized ideally?).
+            // Let's just toggle minimize state. The HUD renders based on showMicrostructure.
+            // If showMicrostructure is false, toggle minimize does nothing unless we open it.
+            setShowMicrostructure(true);
+            return;
+        }
+        setActiveIndicators(prev => {
+            const next = new Set(prev);
+            if (next.has(indicator)) {
+                next.delete(indicator);
+            } else {
+                next.add(indicator);
+            }
+            return next;
+        });
+    }, [setIsHudMinimized, setShowMicrostructure]);
 
     // Load saved workspace state
     useEffect(() => {
@@ -689,9 +708,18 @@ function TradingTerminalContent() {
                     </div>
 
                     <div className="ml-auto flex items-center gap-3">
+
                         <div className="hidden sm:block">
                             <TimeframeSelector selected={selectedInterval} onSelect={setSelectedInterval} />
                         </div>
+
+                        <button
+                            onClick={() => setShowMicrostructure(!showMicrostructure)}
+                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${showMicrostructure ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:border-white/20'}`}
+                        >
+                            <Sparkles className="w-3 h-3" />
+                            <span className="hidden sm:inline">AI Nexus</span>
+                        </button>
 
                         <div className="relative" ref={indicatorMenuRef}>
                             <button
@@ -704,7 +732,9 @@ function TradingTerminalContent() {
 
                             {showIndicatorMenu && (
                                 <div className="absolute top-full right-0 mt-1 w-48 bg-[#0b0b0b] border border-gray-800 rounded-xl shadow-2xl py-1.5 flex flex-col z-[100] overflow-hidden">
-                                    {['EMA 50', 'EMA 200', 'Supertrend', 'Elliot Wave', 'Bollinger Bands', 'VWAP', 'Parabolic SAR'].map(ind => (
+                                    {['Volume', 'EMA 50', 'EMA 200', 'Supertrend', 'Elliott Wave A-B-C', 'RSI', 'Bollinger Bands', 'VWAP', 'Parabolic SAR'].map(ind => (
+
+
                                         <button
                                             key={ind}
                                             onClick={() => toggleIndicator(ind)}
@@ -920,7 +950,7 @@ function TradingTerminalContent() {
                                             orderForm: settings.panels.find(p => p.id === 'orderForm')?.enabled ?? true,
                                             console: settings.panels.find(p => p.id === 'console')?.enabled ?? true,
                                         }}
-                                        chartPanel={<ChartTabs symbol={selectedToken} interval={selectedInterval} positions={positions} openOrders={openOrders} bias={aiBias} onPriceSelect={setBookPrice} currentPrice={currentPrice} openInterest={selectedTokenData?.openInterest || 0} fundingRate={selectedTokenData?.funding || 0} activeIndicators={activeIndicators} />}
+                                        chartPanel={<ChartTabs symbol={selectedToken} interval={selectedInterval} positions={positions} openOrders={openOrders} bias={aiBias} onPriceSelect={setBookPrice} currentPrice={currentPrice} openInterest={selectedTokenData?.openInterest || 0} fundingRate={selectedTokenData?.funding || 0} activeIndicators={activeIndicators} onToggleIndicator={toggleIndicator} />}
                                         orderBookPanel={<PremiumOrderBook coin={selectedToken} currentPrice={currentPrice} onSelectPrice={setBookPrice} onSelectSize={setBookSize} />}
                                         orderFormPanel={<OrderForm symbol={selectedToken} currentPrice={currentPrice} isAuthenticated={isAuthenticated} token={token} walletBalance={walletBalance} agent={agent} isAgentActive={isAgentActive} onEnableAgent={enableSession} onLogin={() => login('google')} onDeposit={() => setShowDeposit(true)} selectedPrice={bookPrice} selectedSize={bookSize} error={error || undefined} />}
                                         consolePanel={
@@ -971,8 +1001,17 @@ function TradingTerminalContent() {
                                                     </div>
                                                 </div>
                                                 <div className="flex-1 overflow-hidden relative">
-                                                    {['positions', 'orders', 'analysis'].includes(activeTab as any) ? (
-                                                        <DashboardPanel isAuthenticated={isAuthenticated || !!walletAddress} positions={positions} openOrders={openOrders} tokens={tokens} onSelectToken={setSelectedToken} onClosePosition={handleClosePosition} onCancelOrder={handleCancelOrder} onAnalyze={handleAnalyzePosition} activeTabOverride={activeTab === 'analysis' ? 'positions' : activeTab as any} />
+                                                    {['positions', 'orders'].includes(activeTab as any) ? (
+                                                        <DashboardPanel isAuthenticated={isAuthenticated || !!walletAddress} positions={positions} openOrders={openOrders} tokens={tokens} onSelectToken={setSelectedToken} onClosePosition={handleClosePosition} onCancelOrder={handleCancelOrder} onAnalyze={handleAnalyzePosition} activeTabOverride={activeTab as any} />
+                                                    ) : activeTab === 'analysis' ? (
+                                                        <div className="h-full p-4 overflow-y-auto custom-scrollbar">
+                                                            <AIAnalysis
+                                                                symbol={selectedToken}
+                                                                interval={selectedInterval}
+                                                                positionContext={positions.find((p: any) => (p.coin || p.position?.coin) === selectedToken)}
+                                                                onClosePosition={handleClosePosition}
+                                                            />
+                                                        </div>
                                                     ) : activeTab === 'twap' ? (
                                                         <TwapIntelligence symbol={selectedToken} />
                                                     ) : activeTab === 'cohorts' ? (
@@ -1023,6 +1062,14 @@ function TradingTerminalContent() {
                                         openInterest={selectedTokenData?.openInterest || 0}
                                         fundingRate={selectedTokenData?.funding || 0}
                                         activeIndicators={activeIndicators}
+                                        onToggleIndicator={toggleIndicator}
+                                        onNavigate={(tab) => {
+                                            if (tab === 'predictions') setActiveTab('intel' as any);
+                                            // The user said "our news and prediction page".
+                                            // If 'predictions' tab exists, use it. If not, maybe 'intel'.
+                                            // I will use type assertion to bypass strict check for now as I can't see the full type.
+                                            else setActiveTab(tab as any);
+                                        }}
                                     />
                                 </div>
 
@@ -1112,6 +1159,20 @@ function TradingTerminalContent() {
                     <ClosePositionModal position={selectedPositionToClose} onClose={() => setShowCloseModal(false)} onConfirm={handleConfirmClose} />
                 )}
             </Suspense>
+
+            {/* Microstructure HUD Overlay */}
+            <AnimatePresence>
+                {showMicrostructure && (
+                    <Suspense fallback={null}>
+                        <MicrostructureHUD
+                            onClose={() => setShowMicrostructure(false)}
+                            symbol={selectedToken}
+                            isMinimized={isHudMinimized}
+                            onToggleMinimize={() => setIsHudMinimized(prev => !prev)}
+                        />
+                    </Suspense>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

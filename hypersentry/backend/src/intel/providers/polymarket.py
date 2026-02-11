@@ -28,9 +28,14 @@ class PolymarketProvider(IntelProvider):
             params = {
                 "active": "true",
                 "closed": "false",
-                "limit": 60,
-                # We'll fetch without a specific tag to get a global view
-                # but we'll prioritize high volume/relevance
+                "limit": 100,
+                # Fetch more events to ensure we don't miss dated mini-markets
+            }
+            
+            # Use aggressive headers to mimic a browser and avoid regional blocks
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "Accept": "application/json"
             }
             
             response = await self.client.get(f"{self.base_url}/events", params=params)
@@ -75,7 +80,7 @@ class PolymarketProvider(IntelProvider):
                     category = "Politics"
                 elif any(x in lower_title for x in ["fed", "rate", "inflation", "cpi", "fomc", "powell"]):
                     category = "Economics"
-                elif any(x in lower_title for x in ["war", "invade", "attack", "conflict", "military", "strike", "iran", "russia", "china", "ukraine", "taiwan"]):
+                elif any(x in lower_title for x in ["war", "invade", "attack", "conflict", "military", "strike", "iran", "russia", "china", "ukraine", "taiwan", "israel", "hezbollah", "houthi"]):
                     category = "Geo-Political"
 
                 # Flag high-impact / "Suspicious" spikes or extreme odds
@@ -113,8 +118,11 @@ class PolymarketProvider(IntelProvider):
                 
                 normalized_items.append(normalized)
                 
-            # Sort normalized items: high impact first, then by volume if available
+            # Sort by absolute impact and relevance
             normalized_items.sort(key=lambda x: (x.get("is_high_impact", False), x.get("metadata", {}).get("volume", 0)), reverse=True)
+            
+            # Log for debugging why we might miss things
+            logger.info(f"🔮 Polymarket Engine parsed {len(normalized_items)} and identified {sum(1 for x in normalized_items if x.get('is_high_impact'))} high-impact events.")
             
             return normalized_items
 

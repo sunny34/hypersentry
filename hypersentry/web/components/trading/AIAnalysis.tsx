@@ -29,6 +29,11 @@ interface Analysis {
         macd_signal: 'bullish' | 'bearish' | 'neutral';
         trend: 'up' | 'down' | 'sideways';
     };
+    /** Dynamic Insider Signals from Order Book */
+    insider_signals?: {
+        spoofing: string;
+        whale_bias: string;
+    };
     /** Unix timestamp of the analysis generation */
     timestamp: number;
 }
@@ -186,7 +191,7 @@ export default function AIAnalysis({ symbol, interval = "60", positionContext, o
                                 <UserCheck className="w-4 h-4 text-blue-400 mt-0.5" />
                                 <div className="flex-1">
                                     <p className="text-[10px] text-gray-400 leading-snug">
-                                        <span className="text-white font-black uppercase tracking-tighter">Spoofing Detection:</span> Large orders detected near significant levels suggesting hidden trend accumulation.
+                                        <span className="text-white font-black uppercase tracking-tighter">Wall Detect:</span> {analysis.insider_signals?.spoofing || "Scanning L2 Order Book..."}
                                     </p>
                                 </div>
                             </div>
@@ -194,7 +199,7 @@ export default function AIAnalysis({ symbol, interval = "60", positionContext, o
                                 <TrendingUp className="w-4 h-4 text-emerald-400 mt-0.5" />
                                 <div className="flex-1">
                                     <p className="text-[10px] text-gray-400 leading-snug">
-                                        <span className="text-white font-black uppercase tracking-tighter">Whale Bias:</span> Aggressive taker volume spikes observed in short-duration flow analysis.
+                                        <span className="text-white font-black uppercase tracking-tighter">Whale Bias:</span> {analysis.insider_signals?.whale_bias || "Calculating Taker Flow..."}
                                     </p>
                                 </div>
                             </div>

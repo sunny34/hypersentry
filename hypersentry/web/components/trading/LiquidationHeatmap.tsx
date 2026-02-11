@@ -59,16 +59,8 @@ export default function LiquidationHeatmap({
                     })));
                 }
             } catch (e) {
-                // Use mock data if API unavailable
-                const mockLiqs: RecentLiquidation[] = Array(10).fill(0).map((_, i) => ({
-                    coin: symbol,
-                    px: (currentPrice * (1 + (Math.random() - 0.5) * 0.1)).toFixed(2),
-                    sz: (Math.random() * 10).toFixed(4),
-                    side: Math.random() > 0.5 ? 'long' : 'short',
-                    time: Date.now() - i * 30000,
-                    usdValue: Math.random() * 500000 + 10000
-                }));
-                setRecentLiqs(mockLiqs);
+                console.error("Failed to fetch liquidations:", e);
+                setRecentLiqs([]);
             }
         };
         fetchLiqs();

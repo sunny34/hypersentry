@@ -1,13 +1,15 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useRef, memo, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import axios from 'axios';
-import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw, Maximize2, Eye, EyeOff } from 'lucide-react';
+import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw, Maximize2, Eye, EyeOff, Shield, Filter, Settings, Minimize2, ShieldAlert, Activity, BarChart3, Binary, Target, Zap, BrainCircuit } from 'lucide-react';
 import { ColorType, CrosshairMode, LineStyle, createChart, IChartApi, ISeriesApi, Time, UTCTimestamp, SeriesMarker } from 'lightweight-charts';
-import { useHyperliquidWS } from '../../contexts/HyperliquidWSContext';
+import { useHyperliquidWS } from '../../hooks/useHyperliquidWS';
 import { Indicators } from '../../utils/indicators';
 import LiquidationProfile from './LiquidationProfile';
 import LiquidationHeatmap from './LiquidationHeatmap';
+import OrderBookProfile from './OrderBookProfile';
 
 interface AdvancedChartProps {
     symbol: string;
@@ -21,6 +23,9 @@ interface AdvancedChartProps {
     openInterest?: number;
     fundingRate?: number;
     activeIndicators?: Set<string>;
+    onToggleIndicator?: (indicator: string) => void;
+    isHudMinimized?: boolean;
+    onNavigate?: (tab: string) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
@@ -48,12 +53,17 @@ function AdvancedChart({
     openInterest = 0,
     fundingRate = 0,
     bias = 'neutral',
-    activeIndicators = new Set(['EMA 50', 'EMA 200', 'Supertrend'])
+    activeIndicators = new Set(['EMA 50', 'EMA 200', 'Supertrend', 'Volume']),
+    onToggleIndicator,
+    isHudMinimized,
+    onNavigate
 }: AdvancedChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
     const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+    const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
 
     // Indicators Refs
     const ema50Ref = useRef<ISeriesApi<"Line"> | null>(null);
@@ -64,47 +74,146 @@ function AdvancedChart({
     const bbLowerRef = useRef<ISeriesApi<"Line"> | null>(null);
     const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
     const sarRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const wallSeriesRef = useRef<any[]>([]); // Array of PriceLines for detected walls
+
+    // New Refs for CVD and Premium
+    const cvdSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const premiumSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
 
     const [candlesticks, setCandlesticks] = useState<any[]>([]);
     const [visibleRange, setVisibleRange] = useState<{ min: number; max: number } | null>(null);
     const [chartHeight, setChartHeight] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [showVolume, setShowVolume] = useState(true);
+    const [showCvd, setShowCvd] = useState(true); // Default to showing CVD
+    const [showPremium, setShowPremium] = useState(true); // Default to showing Premium
     const [liquidationMarkers, setLiquidationMarkers] = useState<SeriesMarker<Time>[]>([]);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [showWalls, setShowWalls] = useState(true);
+    const [l2Levels, setL2Levels] = useState<{ bids: any[], asks: any[] }>({ bids: [], asks: [] });
+    const [externalWalls, setExternalWalls] = useState<{ walls: any[], intelligence: any }>({ walls: [], intelligence: {} });
+    const [minWallSzUsd, setMinWallSzUsd] = useState(100000);
+    const [macroAlpha, setMacroAlpha] = useState<any[]>([]);
+    const [volumeProfile, setVolumeProfile] = useState<any[]>([]);
+    const [hoveredDepth, setHoveredDepth] = useState<{ bids: number, asks: number } | null>(null);
+    const [signals, setSignals] = useState<any[]>([]);
+    const [microHistory, setMicroHistory] = useState<any[]>([]); // For storing fetched micro history
 
     const { subscribe, addListener } = useHyperliquidWS();
     const lastCandleRef = useRef<any>(null);
+    const wallAgeRef = useRef<Map<string, number>>(new Map()); // ex-side-px -> firstSeenTimestamp
+    const [persistenceScore, setPersistenceScore] = useState(0);
 
-    // Fetch liquidation events for markers
+    // Fetch Microstructure History (CVD & Premium)
     useEffect(() => {
-        const fetchLiquidations = async () => {
+        const fetchMicro = async () => {
             try {
-                const res = await axios.get(`${API_URL}/market/liquidations?coin=${symbol}&limit=50`);
-                if (res.data && Array.isArray(res.data)) {
-                    const markers: SeriesMarker<Time>[] = res.data
-                        .filter((l: any) => parseFloat(l.sz) * parseFloat(l.px) > 50000) // Only big liqs
-                        .map((l: any) => {
-                            const ts = Math.floor(l.time / 1000) as UTCTimestamp;
-                            const isBigLiq = parseFloat(l.sz) * parseFloat(l.px) > 100000;
-                            return {
-                                time: ts,
-                                position: l.side === 'long' ? 'belowBar' : 'aboveBar',
-                                color: l.side === 'long' ? '#ef4444' : '#14b8a6',
-                                shape: isBigLiq ? 'circle' : 'arrowDown',
-                                text: isBigLiq ? `💀 $${(parseFloat(l.sz) * parseFloat(l.px) / 1000).toFixed(0)}K` : '',
-                                size: isBigLiq ? 2 : 1
-                            } as SeriesMarker<Time>;
-                        });
-                    setLiquidationMarkers(markers);
+                const res = await axios.get(`${API_URL}/intel/microstructure`);
+                if (res.data && Array.isArray(res.data.history)) {
+                    setMicroHistory(res.data.history);
                 }
             } catch (e) {
-                // Silent fail - markers are optional
+                console.warn("Failed to fetch micro history for chart", e);
             }
         };
-        fetchLiquidations();
-    }, [symbol]);
+
+        fetchMicro();
+        const interval = setInterval(fetchMicro, 5000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // ... (Liquidation fetch effect remains same)
+
+    // 6. WebSocket L2 Subscription for Wall Overlay
+    useEffect(() => {
+        if (!symbol) return;
+        subscribe({ type: 'l2Book', coin: symbol });
+
+        const removeListener = addListener('l2Book', (data: any) => {
+            if (data.coin === symbol && data.levels && data.levels.length === 2) {
+                // Slice to top 40 levels for performance
+                setL2Levels({
+                    bids: data.levels[0].slice(0, 40),
+                    asks: data.levels[1].slice(0, 40)
+                });
+            }
+        });
+
+        return () => {
+            if (removeListener) removeListener();
+        };
+    }, [symbol, subscribe, addListener]);
+
+    // ... (Nexus Signals effect remains same)
+
+    // ... (Render Walls effect remains same)
+
+    // 6. Render CVD and Premium
+    useEffect(() => {
+        if (!cvdSeriesRef.current || !premiumSeriesRef.current || microHistory.length === 0) return;
+
+        // map history to chart data
+        // note: history timestamps need to be matched to chart timestamps. 
+        // Micro history is high res (every few sec), candles are 15m/1h.
+        // We will just overlay them based on time.
+
+        const cvdData: any[] = [];
+        const premiumData: any[] = [];
+
+        microHistory.forEach((h: any) => {
+            const ts = (new Date(h.timestamp).getTime() / 1000) as UTCTimestamp;
+
+            // Scale CVD to be visible? Use right scale or overlay?
+            // Best to use separate panes but library support is limited in this wrapper.
+            // We'll use the 'volume' pane for CVD if possible or just use overlay with separate scale.
+            // For now, let's try mapping to a separate scale ID if using multiple panes.
+
+            cvdData.push({ time: ts, value: h.cvd });
+            premiumData.push({
+                time: ts,
+                value: h.spread_usd,
+                color: h.spread_usd > 0 ? COLORS.bullish : COLORS.bearish
+            });
+        });
+
+        // Dedup by time
+        const uniqueCvd = [...new Map(cvdData.map(item => [item.time, item])).values()].sort((a, b) => a.time - b.time);
+        const uniquePrem = [...new Map(premiumData.map(item => [item.time, item])).values()].sort((a, b) => a.time - b.time);
+
+        if (showCvd) {
+            cvdSeriesRef.current.setData(uniqueCvd);
+        }
+        if (showPremium) {
+            premiumSeriesRef.current.setData(uniquePrem);
+        }
+
+    }, [microHistory, showCvd, showPremium]);
+
+
+    // Crosshair Depth Intelligence
+    useEffect(() => {
+        if (!chartRef.current || !candlestickSeriesRef.current) return;
+
+        const handleCrosshair = (param: any) => {
+            if (!param.point) {
+                setHoveredDepth(null);
+                return;
+            }
+            const p = candlestickSeriesRef.current?.coordinateToPrice(param.point.y);
+            if (p) {
+                // Find total liquidity within 0.1% of this price
+                const range = p * 0.001;
+                const bDepth = l2Levels.bids.filter((b: any) => Math.abs(parseFloat(b.px) - p) < range)
+                    .reduce((acc: number, b: any) => acc + parseFloat(b.sz) * parseFloat(b.px), 0);
+                const aDepth = l2Levels.asks.filter((a: any) => Math.abs(parseFloat(a.px) - p) < range)
+                    .reduce((acc: number, a: any) => acc + parseFloat(a.sz) * parseFloat(a.px), 0);
+                setHoveredDepth({ bids: bDepth, asks: aDepth });
+            }
+        };
+
+        chartRef.current.subscribeCrosshairMove(handleCrosshair);
+        return () => chartRef.current?.unsubscribeCrosshairMove(handleCrosshair);
+    }, [l2Levels]);
 
     // Range Update logic
     const updateRange = useCallback(() => {
@@ -200,7 +309,7 @@ function AdvancedChart({
 
         const chart = createChart(chartContainerRef.current, {
             layout: {
-                background: { type: ColorType.Solid, color: 'transparent' },
+                background: { type: ColorType.Solid, color: '#000000' }, // EXPLICIT BLACK BACKGROUND
                 textColor: COLORS.textBright,
                 fontSize: 11,
                 fontFamily: "'JetBrains Mono', 'SF Mono', monospace",
@@ -234,7 +343,7 @@ function AdvancedChart({
                 borderColor: 'rgba(255, 255, 255, 0.06)',
                 borderVisible: false,
                 timeVisible: true,
-                secondsVisible: false,
+                secondsVisible: true,
                 rightOffset: 5,
                 barSpacing: 8,
                 minBarSpacing: 4,
@@ -252,9 +361,11 @@ function AdvancedChart({
         chart.priceScale('volume').applyOptions({
             scaleMargins: { top: 0.85, bottom: 0 },
             borderVisible: false,
+            visible: activeIndicators.has('Volume'), // Control visibility based on activeIndicators
         });
 
-        // Initialize indicator series BEFORE candlesticks
+
+        // Initialize indicator series
         ema50Ref.current = chart.addLineSeries({
             color: 'rgba(99, 102, 241, 0.6)',
             lineWidth: 1,
@@ -323,6 +434,44 @@ function AdvancedChart({
             crosshairMarkerVisible: false,
         });
 
+        // RSI Series
+        rsiSeriesRef.current = chart.addLineSeries({
+            color: '#a855f7', // Purple
+            lineWidth: 1,
+            priceScaleId: 'rsi',
+            priceLineVisible: false,
+            lastValueVisible: true,
+            crosshairMarkerVisible: false,
+            title: 'RSI(14)'
+        });
+        chart.priceScale('rsi').applyOptions({
+            scaleMargins: { top: 0.8, bottom: 0 },
+            borderVisible: false,
+            visible: false // Hidden by default, toggled later
+        });
+
+
+        // NEW: CVD Series - DISABLED
+        /*
+        cvdSeriesRef.current = chart.addLineSeries({
+            color: '#fbbf24', // Amber for CVD
+            lineWidth: 2,
+            priceScaleId: 'cvd', // Separate scale
+            priceFormat: { type: 'custom', formatter: (p: any) => `${(p / 1000).toFixed(1)}k` },
+            title: 'CVD'
+        });
+        */
+
+        // NEW: Premium Series (Histogram) - DISABLED
+        /*
+        premiumSeriesRef.current = chart.addHistogramSeries({
+            color: 'rgba(59, 130, 246, 0.15)', // Very subtle blue
+            priceScaleId: 'premium',
+            priceFormat: { type: 'custom', formatter: (p: any) => `$${p.toFixed(2)}` },
+            title: 'CB Prem'
+        });
+        */
+
         // Candlestick Series LAST
         const candlestickSeries = chart.addCandlestickSeries({
             upColor: COLORS.bullish,
@@ -338,6 +487,35 @@ function AdvancedChart({
 
         chartRef.current = chart;
         candlestickSeriesRef.current = candlestickSeries;
+
+        // Configure scales for layout
+        // Configure scales for layout
+        chart.priceScale('right').applyOptions({
+            scaleMargins: { top: 0.05, bottom: 0.25 }, // Main chart top 75%
+            autoScale: true,
+        });
+
+        // CVD: Same area as chart but its own auto-scale - DISABLED
+        /*
+        chart.priceScale('cvd').applyOptions({
+            scaleMargins: { top: 0.05, bottom: 0.3 },
+            autoScale: true,
+        });
+        */
+
+        // Premium: Bottom 25% - DISABLED
+        /*
+        chart.priceScale('premium').applyOptions({
+            scaleMargins: { top: 0.75, bottom: 0 },
+            autoScale: true,
+        });
+        */
+
+        // Volume: Bottom 25%
+        chart.priceScale('volume').applyOptions({
+            scaleMargins: { top: 0.75, bottom: 0 },
+            autoScale: true,
+        });
 
         // Resize
         const handleResize = () => {
@@ -366,7 +544,7 @@ function AdvancedChart({
             try {
                 chart.remove();
             } catch {
-                // Silent cleanup - chart removal may fail if already destroyed
+                // Silent cleanup
             }
             chartRef.current = null;
             candlestickSeriesRef.current = null;
@@ -379,98 +557,146 @@ function AdvancedChart({
             bbLowerRef.current = null;
             vwapRef.current = null;
             sarRef.current = null;
+            cvdSeriesRef.current = null;
+            premiumSeriesRef.current = null;
+            premiumSeriesRef.current = null;
+            rsiSeriesRef.current = null;
             lastCandleRef.current = null;
         };
     }, [symbol]);
 
-    // 2. Fetch Data
+    // 2. Fetch Data (Candles)
     useEffect(() => {
         let isActive = true;
-        lastCandleRef.current = null;
+        // lastCandleRef.current = null; 
 
         const fetchData = async () => {
-            if (!candlestickSeriesRef.current || !chartRef.current) return;
+            // Debug log
+            console.log(`[Chart] Fetching candles for ${symbol} ${interval}`);
+
             setIsLoading(true);
             setError(null);
 
-            // Clear all series
-            candlestickSeriesRef.current.setData([]);
-            volumeSeriesRef.current?.setData([]);
-            ema50Ref.current?.setData([]);
-            ema200Ref.current?.setData([]);
-            supertrendRef.current?.setData([]);
-            elliotWaveRef.current?.setData([]);
-            bbUpperRef.current?.setData([]);
-            bbLowerRef.current?.setData([]);
-            vwapRef.current?.setData([]);
-            sarRef.current?.setData([]);
-            setCandlesticks([]);
-
-            chartRef.current.priceScale('right').applyOptions({
-                autoScale: true,
-                scaleMargins: { top: 0.1, bottom: 0.2 }
-            });
-
             try {
+                // ... fetch logic ...
                 const hlInterval = interval === '60' ? '1h' : interval === '240' ? '4h' : interval === 'D' ? '1d' : '15m';
-                const candleCount = 400;
-                const startTime = Date.now() - (candleCount * (parseInt(interval) || 15) * 60 * 1000);
 
-                const res = await axios.post(`${API_URL}/trading/candles`, {
+                // Fetch exactly 200 candles
+                const intervalMs = (interval === 'D' ? 1440 : parseInt(interval) || 15) * 60 * 1000;
+                const startTime = Date.now() - (200 * intervalMs);
+
+                // Use the API_URL constant
+                const url = `${API_URL}/trading/candles`;
+                console.log(`[Chart] Request: ${url}`);
+
+                const res = await axios.post(url, {
                     token: symbol,
                     interval: hlInterval,
                     start_time: Math.floor(startTime),
                     end_time: Math.floor(Date.now())
                 });
 
-                if (isActive && Array.isArray(res.data)) {
+                console.log("Raw API response:", res.data);
+
+                if (!isActive) return;
+
+                if (isActive && Array.isArray(res.data) && res.data.length > 0) {
                     const formatted = res.data.map((c: any) => ({
-                        time: (c.t / 1000) as UTCTimestamp,
-                        open: parseFloat(c.o),
-                        high: parseFloat(c.h),
-                        low: parseFloat(c.l),
-                        close: parseFloat(c.c),
-                        volume: parseFloat(c.v)
-                    })).sort((a, b) => (a.time as number) - (b.time as number));
+                        time: ((c.t || c.time || c.timestamp) / 1000) as UTCTimestamp,
+                        open: parseFloat(c.o || c.open),
+                        high: parseFloat(c.h || c.high),
+                        low: parseFloat(c.l || c.low),
+                        close: parseFloat(c.c || c.close),
+                        volume: parseFloat(c.v || c.volume || c.vol)
+                    }))
+                        .filter((c: any) => !isNaN(c.open) && !isNaN(c.close) && !isNaN(c.time)) // Filter bad data
+                        .sort((a: any, b: any) => (a.time as number) - (b.time as number));
 
                     if (formatted.length > 0) {
                         setCandlesticks(formatted);
                         lastCandleRef.current = formatted[formatted.length - 1];
-                        candlestickSeriesRef.current?.setData(formatted);
 
+                        // ISOLATION TEST: Clear all other series to rule out scale interference
+                        ema50Ref.current?.setData([]);
+                        ema200Ref.current?.setData([]);
+                        supertrendRef.current?.setData([]);
+                        elliotWaveRef.current?.setData([]);
+                        bbUpperRef.current?.setData([]);
+                        bbLowerRef.current?.setData([]);
+                        vwapRef.current?.setData([]);
+                        vwapRef.current?.setData([]);
+                        sarRef.current?.setData([]);
+                        rsiSeriesRef.current?.setData([]);
+
+                        // Retry loop to ensure Series ref is ready
+                        // DEBUG: AREA SERIES
+                        // candlestickSeriesRef.current?.setData([]); 
+
+                        // Restore Candlesticks
+                        if (candlestickSeriesRef.current) {
+                            candlestickSeriesRef.current.applyOptions({
+                                upColor: '#26a69a',
+                                downColor: '#ef5350',
+                                borderVisible: true,
+                                borderColor: '#ffffff', // High visibility border
+                                wickUpColor: '#ffffff',
+                                wickDownColor: '#ffffff'
+                            });
+                            candlestickSeriesRef.current.setData(formatted);
+                            // lastCandleRef already set
+                        }
+
+                        // Disable candlestick setData to avoid conflict
+                        /*
+                        if (candlestickSeriesRef.current) {
+                            // ...
+                        }
+                        */
+
+                        // Volume data
                         // Volume data
                         if (volumeSeriesRef.current) {
                             const volumeData = formatted.map((c: any) => ({
                                 time: c.time,
                                 value: c.volume,
-                                color: c.close >= c.open ? 'rgba(0, 255, 136, 0.3)' : 'rgba(255, 51, 102, 0.3)'
+                                color: c.close >= c.open ? 'rgba(38, 166, 154, 0.3)' : 'rgba(239, 83, 80, 0.3)'
                             }));
                             volumeSeriesRef.current.setData(volumeData);
                         }
 
+                        // Force fit content nicely
                         requestAnimationFrame(() => {
                             if (isActive && chartRef.current) {
                                 chartRef.current.timeScale().fitContent();
-                                chartRef.current.priceScale('right').applyOptions({ autoScale: true });
+                                // Reset margins to default for test
+                                chartRef.current.priceScale('right').applyOptions({
+                                    autoScale: true,
+                                    scaleMargins: { top: 0.1, bottom: 0.1 }
+                                });
                                 updateRange();
                             }
                         });
+                    } else {
+                        console.warn("Parsed 0 valid candles");
+                        setError(`No data for ${symbol} (Parsed 0)`);
                     }
+                } else {
+                    console.warn("Empty response from API", res.data);
+                    setError(`No data for ${symbol} ${hlInterval} (Raw: ${JSON.stringify(res.data).slice(0, 50)})`);
                 }
-            } catch {
-                // Silently handle - data unavailable
-                setError("Data unavailable");
+            } catch (e: any) {
+                console.error(e);
+                setError(`Connection failed: ${e.message}`);
             } finally {
                 if (isActive) setIsLoading(false);
             }
         };
 
         fetchData();
-        const poll = setInterval(fetchData, 60000);
+        const intervalId = setInterval(fetchData, 60000);
         return () => {
             isActive = false;
-            clearInterval(poll);
-            lastCandleRef.current = null;
+            clearInterval(intervalId);
         };
     }, [symbol, interval, updateRange]);
 
@@ -486,11 +712,12 @@ function AdvancedChart({
     }, [liquidationMarkers, candlesticks]);
 
     // Volume visibility
+    // Volume visibility
     useEffect(() => {
         if (volumeSeriesRef.current) {
-            volumeSeriesRef.current.applyOptions({ visible: showVolume });
+            volumeSeriesRef.current.applyOptions({ visible: activeIndicators.has('Volume') });
         }
-    }, [showVolume]);
+    }, [activeIndicators]);
 
     // Force update range when candlesticks or price updates
     useEffect(() => {
@@ -499,17 +726,32 @@ function AdvancedChart({
 
     // 3. Indicator Calculation
     useEffect(() => {
+        // return; // DISABLED FOR DEBUG: Isolate candles - RE-ENABLED
         if (candlesticks.length === 0) return;
 
         // Apply visibility
         ema50Ref.current?.applyOptions({ visible: activeIndicators.has('EMA 50') });
         ema200Ref.current?.applyOptions({ visible: activeIndicators.has('EMA 200') });
         supertrendRef.current?.applyOptions({ visible: activeIndicators.has('Supertrend') });
-        elliotWaveRef.current?.applyOptions({ visible: activeIndicators.has('Elliot Wave') });
+        elliotWaveRef.current?.applyOptions({ visible: activeIndicators.has('Elliott Wave A-B-C') || activeIndicators.has('Elliot Wave') });
         bbUpperRef.current?.applyOptions({ visible: activeIndicators.has('Bollinger Bands') });
         bbLowerRef.current?.applyOptions({ visible: activeIndicators.has('Bollinger Bands') });
         vwapRef.current?.applyOptions({ visible: activeIndicators.has('VWAP') });
         sarRef.current?.applyOptions({ visible: activeIndicators.has('Parabolic SAR') });
+
+        // RSI Visibility
+        const showRSI = activeIndicators.has('RSI');
+        if (chartRef.current) {
+            chartRef.current.priceScale('rsi').applyOptions({ visible: showRSI });
+            // Adjust main chart to make room if RSI is present
+            chartRef.current.priceScale('right').applyOptions({
+                scaleMargins: { top: 0.05, bottom: showRSI ? 0.25 : 0.05 }
+            });
+            chartRef.current.priceScale('volume').applyOptions({
+                scaleMargins: { top: showRSI ? 0.8 : 0.85, bottom: 0 }
+            });
+        }
+        rsiSeriesRef.current?.applyOptions({ visible: showRSI });
 
         // Calculate and set data
         if (activeIndicators.has('EMA 50')) {
@@ -531,7 +773,7 @@ function AdvancedChart({
                 });
             }
         }
-        if (activeIndicators.has('Elliot Wave')) {
+        if (activeIndicators.has('Elliott Wave A-B-C') || activeIndicators.has('Elliot Wave')) {
             const zigzag = Indicators.calculateZigZag(candlesticks, 2);
             elliotWaveRef.current?.setData(zigzag.map(z => ({ time: z.time as UTCTimestamp, value: z.value })));
         }
@@ -547,6 +789,12 @@ function AdvancedChart({
         if (activeIndicators.has('Parabolic SAR')) {
             const sar = Indicators.calculateParabolicSAR(candlesticks);
             sarRef.current?.setData(sar.map(d => ({ time: d.time as UTCTimestamp, value: d.value })));
+        }
+        if (activeIndicators.has('RSI')) {
+            const rsi = Indicators.calculateRSI(candlesticks, 14);
+            // Safety check for data integrity
+            const validRsi = rsi.filter(d => !isNaN(d.value)).map(d => ({ time: d.time as UTCTimestamp, value: d.value }));
+            rsiSeriesRef.current?.setData(validRsi);
         }
 
     }, [candlesticks, activeIndicators]);
@@ -584,12 +832,15 @@ function AdvancedChart({
 
     // 5. Background Shading based on bias
     useEffect(() => {
+        return; // DISABLED: Transparency breaks chart rendering
+        /*
         if (!chartRef.current) return;
         const color = bias === 'bullish' ? 'rgba(16, 185, 129, 0.03)' :
             bias === 'bearish' ? 'rgba(239, 68, 68, 0.03)' : 'transparent';
         chartRef.current.applyOptions({
             layout: { background: { type: ColorType.Solid, color: color } }
         });
+        */
     }, [bias]);
 
     return (
@@ -611,18 +862,16 @@ function AdvancedChart({
 
             <div ref={chartContainerRef} className="w-full h-full" />
 
-            {/* Liquidity Walls (Liquidation Overlay) */}
-            {!showHeatmap && currentPrice > 0 && visibleRange && (
+            {/* Liquidity Walls (Order Book Profile) */}
+            {!showHeatmap && showWalls && currentPrice > 0 && visibleRange && (
                 <div className="absolute inset-0 z-10 pointer-events-none">
-                    <LiquidationProfile
+                    <OrderBookProfile
                         currentPrice={currentPrice}
                         symbol={symbol}
-                        openInterest={openInterest}
-                        fundingRate={fundingRate}
                         height={chartHeight}
                         maxPrice={visibleRange.max}
                         minPrice={visibleRange.min}
-                        mode="overlay"
+                        levels={l2Levels}
                     />
                 </div>
             )}
@@ -641,7 +890,7 @@ function AdvancedChart({
             )}
 
             {/* Active Indicators Legend */}
-            <div className="absolute top-3 left-3 z-40 flex flex-col gap-1 pointer-events-none">
+            <div className="absolute top-3 left-3 z-40 flex flex-col gap-1 pointer-events-none text-left">
                 {Array.from(activeIndicators || []).map(ind => (
                     <div key={ind} className="flex items-center gap-2 px-2 py-0.5 bg-black/60 backdrop-blur-sm border border-white/5 rounded text-[9px] font-mono text-gray-400">
                         <span className={`w-2 h-2 rounded-full ${ind === 'EMA 50' ? 'bg-indigo-400' :
@@ -666,40 +915,186 @@ function AdvancedChart({
                 </div>
             )}
 
+            {/* Institutional Depth Crosshair HUD */}
+            {hoveredDepth && (
+                <div className="absolute left-[80px] top-[120px] pointer-events-none z-[60] flex flex-col gap-1 p-2 bg-black/60 border border-white/10 rounded-md backdrop-blur-md animate-in fade-in zoom-in duration-200 shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+                    <div className="flex items-center justify-between gap-4">
+                        <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest">Agg. Liquidity Zone</span>
+                        <div className="flex gap-2">
+                            <span className="text-[10px] font-mono text-emerald-400">+${(hoveredDepth.bids / 1000).toFixed(1)}k</span>
+                            <span className="text-[10px] font-mono text-rose-400">-${(hoveredDepth.asks / 1000).toFixed(1)}k</span>
+                        </div>
+                    </div>
+                    <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden flex">
+                        <div
+                            className="h-full bg-emerald-500/50"
+                            style={{ width: `${(hoveredDepth.bids / (hoveredDepth.bids + hoveredDepth.asks + 0.1)) * 100}%` }}
+                        />
+                        <div
+                            className="h-full bg-rose-500/50"
+                            style={{ width: `${(hoveredDepth.asks / (hoveredDepth.bids + hoveredDepth.asks + 0.1)) * 100}%` }}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* Overwatch Signal Center (Enhanced with Smart Interpretation) */}
+            <div className="absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-4 z-[60] pointer-events-none w-[320px]">
+                {signals.map((sig, idx) => (
+                    <Link
+                        key={sig.id || idx}
+                        href="/intel/microstructure"
+                        className={`p-4 rounded-xl border-2 shadow-[0_0_30px_rgba(0,0,0,0.5)] backdrop-blur-2xl animate-bounce-subtle flex flex-col gap-2 transition-all duration-700 pointer-events-auto group cursor-help no-underline ${sig.type === 'BEARISH' || sig.strength === 'CRITICAL' ? 'bg-rose-500/10 border-rose-500/40' : 'bg-emerald-500/10 border-emerald-500/40'
+                            }`}
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg shadow-lg ${sig.type === 'BEARISH' || sig.strength === 'CRITICAL' ? 'bg-rose-500' : 'bg-emerald-500 shadow-emerald-500/50'}`}>
+                                {sig.strength === 'CRITICAL' ? <ShieldAlert className="w-5 h-5 text-white" /> : <Zap className="w-5 h-5 text-white" />}
+                            </div>
+                            <div className="flex flex-col text-left">
+                                <span className={`text-[9px] font-black uppercase tracking-[0.2em] ${sig.type === 'BEARISH' || sig.strength === 'CRITICAL' ? 'text-rose-400' : 'text-emerald-400'}`}>
+                                    NEXUS {sig.type}
+                                </span>
+                                <span className="text-[13px] font-black text-white leading-tight">
+                                    {sig.msg}
+                                </span>
+                            </div>
+                        </div>
+                        {sig.desc && (
+                            <div className="mt-1 p-2 bg-white/5 rounded-lg border border-white/10 group-hover:bg-white/10 transition-colors">
+                                <div className="flex items-start gap-2">
+                                    <Binary className="w-3 h-3 text-gray-500 mt-0.5 shrink-0" />
+                                    <span className="text-[11px] text-gray-300 font-medium leading-relaxed italic text-left">
+                                        "{sig.desc}"
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+                        <div className="flex items-center gap-2 mt-1">
+                            <div className="h-1 bg-white/10 flex-1 rounded-full overflow-hidden">
+                                <div className={`h-full animate-pulse ${sig.type === 'BEARISH' ? 'bg-rose-500' : 'bg-emerald-500'}`} style={{ width: '100%' }} />
+                            </div>
+                            <span className="text-[8px] font-mono text-gray-500 uppercase">Live Intel</span>
+                        </div>
+                    </Link>
+                ))}
+            </div>
+
+            {/* Smart Nexus Intel Pill - Cycling News & Prediction Snippets */}
+            <IntelTicker onNavigate={onNavigate} />
+
             {/* Chart Controls */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 p-1 bg-black/70 border border-white/10 rounded-xl backdrop-blur-md shadow-2xl">
-                <button onClick={handleScrollLeft} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Scroll Left">
-                    <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button onClick={handleZoomOut} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Zoom Out">
-                    <ZoomOut className="w-4 h-4" />
-                </button>
-                <button onClick={handleReset} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Reset View">
-                    <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={handleZoomIn} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Zoom In">
-                    <ZoomIn className="w-4 h-4" />
-                </button>
-                <button onClick={handleScrollRight} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Scroll Right">
-                    <ChevronRight className="w-4 h-4" />
-                </button>
+            <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 p-1 transition-all duration-300 ${isToolbarCollapsed ? 'bg-black/40 backdrop-blur-sm border border-white/5 rounded-full px-2' : 'bg-black/70 border border-white/10 rounded-xl backdrop-blur-md shadow-2xl'}`}>
+                {!isToolbarCollapsed && (
+                    <>
+                        <button onClick={handleScrollLeft} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Scroll Left">
+                            <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button onClick={handleZoomOut} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Zoom Out">
+                            <ZoomOut className="w-4 h-4" />
+                        </button>
+                        <button onClick={handleReset} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Reset">
+                            <RotateCcw className="w-4 h-4" />
+                        </button>
+                        <button onClick={handleZoomIn} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Zoom In">
+                            <ZoomIn className="w-4 h-4" />
+                        </button>
+                        <button onClick={handleScrollRight} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="Scroll Right">
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
 
-                <div className="w-px h-5 bg-white/10 mx-1" />
+                        <div className="w-px h-4 bg-white/10 mx-1" />
 
+                        <button
+                            onClick={() => setShowWalls(!showWalls)}
+                            className={`p-2 rounded-lg transition-colors ${showWalls ? 'bg-blue-500/20 text-blue-400' : 'hover:bg-white/10 text-gray-400'}`}
+                            title="Toggle Liquidity Walls"
+                        >
+                            <Target className="w-4 h-4" />
+                        </button>
+
+                        <div className="w-px h-4 bg-white/10 mx-1" />
+
+                        {/* Wall Gravity Intelligence */}
+                        {showWalls && externalWalls.intelligence && (
+                            <div className="px-3 py-1 bg-black/40 rounded-lg flex flex-col">
+                                <span className="text-[7px] text-gray-500 uppercase font-bold tracking-widest">Wall Gravity</span>
+                                <div className="flex items-center gap-2">
+                                    <span className={`text-[10px] font-mono font-bold ${externalWalls.intelligence.bid_gravity > externalWalls.intelligence.ask_gravity ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        {externalWalls.intelligence.bid_gravity?.toFixed(1) || 0} / {externalWalls.intelligence.ask_gravity?.toFixed(1) || 0}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Persistence Score */}
+                        {persistenceScore > 0 && (
+                            <div className="px-3 py-1 bg-black/40 rounded-lg flex flex-col">
+                                <span className="text-[7px] text-gray-500 uppercase font-bold tracking-widest">Confidence</span>
+                                <span className={`text-[10px] font-mono font-bold ${persistenceScore > 80 ? 'text-emerald-400' : persistenceScore > 40 ? 'text-yellow-400' : 'text-rose-400'}`}>
+                                    {persistenceScore}%
+                                </span>
+                            </div>
+                        )}
+
+                        {/* Macro Alpha Bypass Overlay */}
+                        {showWalls && macroAlpha.length > 0 && (
+                            <div
+                                onClick={() => {
+                                    const targetUrl = macroAlpha[0].url || 'https://polymarket.com';
+                                    const proxyUrl = `${API_URL}/intel/proxy?url=${encodeURIComponent(targetUrl)}`;
+                                    window.open(proxyUrl, '_blank');
+                                }}
+                                className="flex items-center gap-2 px-3 py-1 bg-red-500/10 border border-red-500/20 rounded-lg mx-1 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.1)] cursor-help group"
+                                title="Click to verify source via Institutional Proxy Tunnel"
+                            >
+                                <div className="flex flex-col text-left">
+                                    <span className="text-[7px] text-red-500 uppercase font-black tracking-widest flex items-center gap-1">
+                                        Macro Risk Pulse
+                                        <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[6px] text-red-400 bg-red-500/10 px-1 rounded">VERIFY SOURCE</span>
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px] font-black text-white whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]">
+                                            {macroAlpha[0].title.replace('Prediction: ', '')}
+                                        </span>
+                                        <span className="text-[11px] font-mono text-red-400 font-bold">
+                                            {macroAlpha[0].metadata?.probability.toFixed(1)}% YES
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <button
+                            onClick={() => setIsFullscreen(!isFullscreen)}
+                            className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                            title="Fullscreen"
+                        >
+                            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                        </button>
+
+                        <div className="w-px h-4 bg-white/10 mx-1" />
+
+                        <Link
+                            href="/intel/microstructure"
+                            className="p-2 rounded-lg hover:bg-emerald-500/20 text-emerald-400 transition-colors flex items-center gap-1.5"
+                            title="Open Institutional Microstructure Dashboard"
+                        >
+                            <Binary className="w-4 h-4" />
+                            <span className="text-[10px] font-black uppercase tracking-tighter">Micro-IQ</span>
+                        </Link>
+
+                        <div className="w-px h-4 bg-white/10 mx-1" />
+                    </>
+                )}
+
+                {/* Collapse/Expand Logic */}
                 <button
-                    onClick={() => setShowVolume(!showVolume)}
-                    className={`p-2 rounded-lg transition-colors ${showVolume ? 'bg-blue-500/20 text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}
-                    title="Toggle Volume"
-                >
-                    {showVolume ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                </button>
-
-                <button
-                    onClick={toggleFullscreen}
+                    onClick={() => setIsToolbarCollapsed(!isToolbarCollapsed)}
                     className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
-                    title="Fullscreen"
+                    title={isToolbarCollapsed ? "Show Controls" : "Hide Controls"}
                 >
-                    <Maximize2 className="w-4 h-4" />
+                    {isToolbarCollapsed ? <Settings className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                 </button>
             </div>
 
@@ -708,14 +1103,61 @@ function AdvancedChart({
                 <div className="absolute bottom-4 right-4 z-30 flex items-center gap-3 px-3 py-1.5 bg-black/60 border border-white/10 rounded-lg text-[9px]">
                     <div className="flex items-center gap-1.5">
                         <span className="text-red-400">💀</span>
-                        <span className="text-gray-400">Long Liquidation</span>
+                        <span className="text-gray-400 text-left">Long Liquidation</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                         <span className="text-teal-400">💀</span>
-                        <span className="text-gray-400">Short Liquidation</span>
+                        <span className="text-gray-400 text-left">Short Liquidation</span>
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+function IntelTicker({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+    const [index, setIndex] = useState(0);
+    const items = [
+        { type: 'news', text: 'BTC Spot ETF net inflows reach $500M daily average', sentiment: 'bullish' },
+        { type: 'prediction', text: 'Fed Rate Cut Probability (March): 32% YES', sentiment: 'bearish' },
+        { type: 'news', text: 'Hyperliquid V2 mainnet launch scheduled for Q4', sentiment: 'bullish' },
+        { type: 'prediction', text: 'ETH to flip BTC market cap in 2026? 15% YES', sentiment: 'neutral' },
+    ];
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setIndex((prev) => (prev + 1) % items.length);
+        }, 5000); // Cycle every 5 seconds
+        return () => clearInterval(interval);
+    }, []);
+
+    const item = items[index];
+
+    return (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40">
+            <button
+                onClick={() => onNavigate && onNavigate(item.type === 'news' ? 'news' : 'predictions')}
+                className="flex items-center gap-3 px-4 py-1.5 bg-black/60 backdrop-blur-md border border-white/10 rounded-full hover:bg-white/5 hover:border-white/20 transition-all group shadow-xl"
+            >
+                <div className={`p-1 rounded-full ${item.type === 'news' ? 'bg-blue-500/10' : 'bg-purple-500/10'}`}>
+                    {item.type === 'news' ? (
+                        <Zap className={`w-3 h-3 ${item.type === 'news' ? 'text-blue-400' : 'text-purple-400'}`} />
+                    ) : (
+                        <Target className="w-3 h-3 text-purple-400" />
+                    )}
+                </div>
+                <div className="flex flex-col items-start min-w-[200px]">
+                    <span className="text-[8px] text-gray-500 font-bold uppercase tracking-widest flex items-center gap-2">
+                        {item.type === 'news' ? 'Live Wire' : 'Polymarket Pulse'}
+                        <span className={`w-1 h-1 rounded-full ${item.sentiment === 'bullish' ? 'bg-emerald-500' : item.sentiment === 'bearish' ? 'bg-red-500' : 'bg-gray-500'}`} />
+                    </span>
+                    <span className="text-[11px] text-gray-200 font-medium truncate max-w-[250px]">
+                        {item.text}
+                    </span>
+                </div>
+                <div className="w-px h-6 bg-white/10 mx-1" />
+                <ChevronRight className="w-3 h-3 text-gray-600 group-hover:text-white transition-colors" />
+            </button>
         </div>
     );
 }

@@ -324,16 +324,22 @@ async def get_active_trades(
 async def get_candles(req: CandlesRequest):
     """Get candle snapshot via backend proxy."""
     try:
+        logger.info(f"🕯️ [CANDLES] Fetching {req.token} {req.interval} | {req.start_time} -> {req.end_time}")
+        
         # Fetch candles using the SDK wrapper
-        candles = manager.client.get_candles(
+        candles = manager.hl_client.get_candles(
             coin=req.token,
             interval=req.interval,
             start_time=req.start_time,
             end_time=req.end_time
         )
+        
+        if not candles:
+            logger.warning(f"⚠️ [CANDLES] Empty response for {req.token}")
+            
         return candles
     except Exception as e:
-        logger.error(f"Failed to fetch candles via proxy: {e}")
+        logger.error(f"❌ [CANDLES] Failed to fetch candles: {e}")
         return []
 
 from pydantic import BaseModel
@@ -343,6 +349,15 @@ class AnalyzeRequest(BaseModel):
     token: str
     interval: Optional[str] = "1h"
     position: Optional[dict] = None
+
+@router.get("/external-walls/{coin}")
+async def get_external_walls(coin: str):
+    """
+    Fetch substantial limit order walls from Binance and Coinbase.
+    Optimized: Returns background-cached data for O(1) response time.
+    """
+    data = manager.passive_walls.get_walls(coin)
+    return data
 
 @router.post("/analyze")
 async def analyze_chart(req: AnalyzeRequest):
@@ -423,16 +438,134 @@ async def analyze_chart(req: AnalyzeRequest):
                             news_summaries.append(art.get("title"))
         except: pass
 
-        # 4. Gemini AI Reasoning
+        # 4. Insider Context (Order Book & Walls)
+        insider_signals = {
+            "spoofing": "No anomalies detected.",
+            "whale_bias": "Neutral order flow."
+        }
+        try:
+            # Fetch L2 Snapshot for Order Book Analysis
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.hyperliquid.xyz/info",
+                    json={"type": "l2Snapshot", "coin": token},
+                    timeout=3
+                ) as resp:
+                    if resp.status == 200:
+                        l2 = await resp.json()
+                        bids = l2.get("levels", [])[0] # List of [px, sz]
+                        asks = l2.get("levels", [])[1]
+                        
+                        if bids and asks:
+                            # 1. Whale Walls (Spoofing Heuristic)
+                            # Find if any single level has > 3x the average volume of top 10 levels
+                            top_10_bid_vol = [float(b['sz']) for b in bids[:10]]
+                            top_10_ask_vol = [float(a['sz']) for a in asks[:10]]
+                            avg_bid_vol = np.mean(top_10_bid_vol)
+                            avg_ask_vol = np.mean(top_10_ask_vol)
+                            
+                            max_bid = max(top_10_bid_vol)
+                            max_ask = max(top_10_ask_vol)
+                            
+                            if max_bid > avg_bid_vol * 4:
+                                insider_signals["spoofing"] = "Large BID wall detected (Potential Accumulation/Spoof Support)."
+                            elif max_ask > avg_ask_vol * 4:
+                                insider_signals["spoofing"] = "Large ASK wall detected (Potential Suppression/Spoof Resistance)."
+                                
+                            # 2. Imbalance (Whale Bias)
+                            total_bid_depth = sum(top_10_bid_vol)
+                            total_ask_depth = sum(top_10_ask_vol)
+                            ratio = total_bid_depth / total_ask_depth if total_ask_depth > 0 else 1
+                            
+                            if ratio > 1.5:
+                                insider_signals["whale_bias"] = "Strong Buy Side Depth (Bids > Asks)."
+                            elif ratio < 0.66:
+                                insider_signals["whale_bias"] = "Heavy Sell Side Pressure (Asks > Bids)."
+                            else:
+                                insider_signals["whale_bias"] = "Balanced order book liquidity."
+        except Exception as e:
+            logger.warning(f"L2 Analysis failed: {e}")
+
+        # 5. Global Spot Liquidity Analysis (Binance + Coinbase + Hyperliquid)
+        # Using aiohttp to fetch public REST Order Books
+        spot_context = {
+            "binance": {"bid_vol": 0, "ask_vol": 0, "price": 0, "active": False},
+            "coinbase": {"bid_vol": 0, "ask_vol": 0, "price": 0, "active": False}
+        }
+        
+        try:
+            # Map symbol to external exchanges
+            # Binance: BTCUSDT, ETHUSDT
+            # Coinbase: BTC-USD, ETH-USD
+            binance_sym = f"{token}USDT"
+            coinbase_sym = f"{token}-USD"
+            
+            async with aiohttp.ClientSession() as session:
+                # Binance Depth (REST API v3)
+                try:
+                    async with session.get(f"https://api.binance.com/api/v3/depth?symbol={binance_sym}&limit=20", timeout=2) as b_resp:
+                        if b_resp.status == 200:
+                            b_data = await b_resp.json()
+                            spot_context["binance"]["bid_vol"] = sum([float(x[1]) for x in b_data.get("bids", [])])
+                            spot_context["binance"]["ask_vol"] = sum([float(x[1]) for x in b_data.get("asks", [])])
+                            spot_context["binance"]["price"] = float(b_data["bids"][0][0]) if b_data["bids"] else 0
+                            spot_context["binance"]["active"] = True
+                except: pass
+
+                # Coinbase Depth (REST API Product Book)
+                try:
+                    async with session.get(f"https://api.exchange.coinbase.com/products/{coinbase_sym}/book?level=2", timeout=2) as c_resp:
+                        if c_resp.status == 200:
+                            c_data = await c_resp.json()
+                            spot_context["coinbase"]["bid_vol"] = sum([float(x[1]) for x in c_data.get("bids", [])[:20]])
+                            spot_context["coinbase"]["ask_vol"] = sum([float(x[1]) for x in c_data.get("asks", [])[:20]])
+                            spot_context["coinbase"]["price"] = float(c_data["bids"][0][0]) if c_data["bids"] else 0
+                            spot_context["coinbase"]["active"] = True
+                except: pass
+
+            # Cross-Exchange Analysis Logic
+            active_spots = [ex for ex, data in spot_context.items() if data["active"]]
+            total_spot_bid = sum(data["bid_vol"] for data in spot_context.values())
+            total_spot_ask = sum(data["ask_vol"] for data in spot_context.values())
+            
+            # 1. Spot-Perp Divergence (Lead-Lag)
+            if active_spots:
+                spot_avg_price = sum(spot_context[ex]["price"] for ex in active_spots) / len(active_spots)
+                
+                if spot_avg_price > current_price * 1.001: # Spot > Perp by 0.1%
+                    insider_signals["whale_bias"] += " | Validated by Spot Premium (Spot > Perp)."
+                elif spot_avg_price < current_price * 0.999:
+                     insider_signals["whale_bias"] += " | Caution: Spot Discount (Spot < Perp)."
+
+            # 2. Wall Verification (Spoofing Check)
+            # Only perform if we have active spot markets to compare against
+            if active_spots and "wall detected" in insider_signals["spoofing"].lower():
+                is_bid_wall = "BID" in insider_signals["spoofing"]
+                spot_side_vol = total_spot_bid if is_bid_wall else total_spot_ask
+                opp_side_vol = total_spot_ask if is_bid_wall else total_spot_bid
+                
+                # If Spot volume is tiny compared to the "wall", it's likely manipulative perp spoofing
+                # Threshold: Spot volume < 50% of opposite side volume (heuristic)
+                if spot_side_vol > 0 and spot_side_vol < opp_side_vol * 0.5:
+                     insider_signals["spoofing"] += f" ⚠️ LIKELY SPOOF: No confirming wall on {', '.join([ex.title() for ex in active_spots])}."
+                else:
+                     insider_signals["spoofing"] += f" ✅ CONFIRMED: Matching liquidity on {', '.join([ex.title() for ex in active_spots])}."
+            elif not active_spots:
+                 if "wall detected" in insider_signals["spoofing"].lower():
+                     insider_signals["spoofing"] += " (Unverified: No Spot Data)"
+                     
+        except Exception as e:
+            logger.warning(f"Cross-Exchange Analysis failed: {e}")
+
+        # 6. Gemini AI Reasoning
         direction = "neutral"
         confidence = 50
         reasoning = "Standard technical evaluation."
         
         if config.GEMINI_API_KEY:
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=config.GEMINI_API_KEY)
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                from google import genai
+                client = genai.Client(api_key=config.GEMINI_API_KEY)
                 
                 # Format Data for AI
                 price_brief = [round(float(c['c']), 4) for c in candles[-15:]]
@@ -452,6 +585,11 @@ async def analyze_chart(req: AnalyzeRequest):
                 - MACD Signal: {macd:.4f}
                 - EMA 50 Trend: {ema_50:.4f} ({trend})
                 
+                INSIDER ORDER BOOK ACITVITY (HYPERLIQUID + BINANCE + COINBASE):
+                - Wall Detection: {insider_signals['spoofing']}
+                - Liquidity Bias: {insider_signals['whale_bias']}
+                - Spot vs Perp Price: {current_price} (HL) vs {spot_context['binance']['price']} (Binance)
+                
                 EXTERNAL ALPHA (NEWS/SENTIMENT):
                 {news_str}
                 
@@ -469,7 +607,11 @@ async def analyze_chart(req: AnalyzeRequest):
                 }}
                 """
                 
-                ai_resp = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+                ai_resp = client.models.generate_content(
+                    model='gemini-1.5-flash',
+                    contents=prompt, 
+                    config={"response_mime_type": "application/json"}
+                )
                 data = json.loads(ai_resp.text.strip())
                 
                 direction = data.get("direction", "neutral").lower()
@@ -498,6 +640,7 @@ async def analyze_chart(req: AnalyzeRequest):
         return {
             "direction": direction,
             "confidence": confidence,
+            "insider_signals": insider_signals,
             "reasoning": reasoning,
             "indicators": {
                 "rsi": float(rsi),
@@ -564,7 +707,7 @@ async def place_order(
                 return JSONResponse(status_code=400, content={"status": "err", "error": "Invalid size"})
                 
             # Execute via Managed Node
-            res = await manager.client.managed_trade(coin=coin, is_buy=is_buy, sz=size, tp=tp, sl=sl, twap=twap)
+            res = await manager.hl_client.managed_trade(coin=coin, is_buy=is_buy, sz=size, tp=tp, sl=sl, twap=twap)
             
             if res.get("status") == "err":
                 logger.error(f"❌ [AUDIT] Managed Order Failed: {res.get('message')}")
@@ -651,7 +794,7 @@ async def get_open_orders(user: str):
     """Get open orders for a user."""
     try:
         # Use manager client
-        orders = manager.client.info.open_orders(user)
+        orders = manager.hl_client.get_open_orders(user)
         return {"orders": orders}
     except Exception as e:
         logger.error(f"Error fetching open orders: {e}")
@@ -666,7 +809,7 @@ async def get_account(user: str):
         if not user:
             return {"error": "User address required"}
             
-        state = manager.client.get_user_state(user)
+        state = manager.hl_client.get_user_state(user)
         if state is None:
             return {"error": "User not found or API error"}
             

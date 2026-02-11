@@ -18,9 +18,8 @@ class DebateAgent:
              return {"text": f"[{self.name}] Technical signal variance detected.", "evidence": "RSI/MACD divergent"}
 
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=config.GEMINI_API_KEY)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            from google import genai
+            client = genai.Client(api_key=config.GEMINI_API_KEY)
             
             prompt = f"""
             Act as {self.name}, a {self.role}. 
@@ -43,9 +42,10 @@ class DebateAgent:
             }}
             """
             
-            response = model.generate_content(
-                prompt, 
-                generation_config={"response_mime_type": "application/json"}
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt,
+                config={"response_mime_type": "application/json"}
             )
             return json.loads(response.text)
         except Exception as e:

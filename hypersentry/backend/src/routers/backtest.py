@@ -10,7 +10,7 @@ async def run_backtest(req: BacktestRequest):
     """Run server-side backtest on real historical data."""
     from src.backtesting import Backtester
     
-    bt = Backtester(manager.client)
+    bt = Backtester(manager.hl_client)
     params = req.params or {}
     
     if req.strategy == "rsi":

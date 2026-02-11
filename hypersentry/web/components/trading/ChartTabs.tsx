@@ -19,6 +19,9 @@ interface ChartTabsProps {
     openInterest?: number;
     fundingRate?: number;
     activeIndicators?: Set<string>;
+    onToggleIndicator?: (indicator: string) => void;
+    isHudMinimized?: boolean;
+    onNavigate?: (tab: string) => void;
 }
 
 type ChartView = 'chart' | 'liquidations' | 'stops';
@@ -39,7 +42,10 @@ function ChartTabs({
     currentPrice = 0,
     openInterest = 0,
     fundingRate = 0,
-    activeIndicators = new Set(['EMA 50', 'EMA 200', 'Supertrend'])
+    activeIndicators = new Set(['EMA 50', 'EMA 200', 'Supertrend', 'Volume']),
+    onToggleIndicator,
+    isHudMinimized,
+    onNavigate
 }: ChartTabsProps) {
     const [activeView, setActiveView] = useState<ChartView>('chart');
 
@@ -119,6 +125,9 @@ function ChartTabs({
                         openInterest={openInterest}
                         fundingRate={fundingRate}
                         activeIndicators={activeIndicators}
+                        onToggleIndicator={onToggleIndicator}
+                        isHudMinimized={isHudMinimized}
+                        onNavigate={onNavigate}
                     />
                 )}
 

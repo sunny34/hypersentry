@@ -215,3 +215,97 @@ async def get_agent_debate(symbol: str, _user: User = Depends(require_pro_user))
     except Exception as e:
         logger.error(f"Debate failed: {e}")
         return {"error": str(e)}
+
+@router.get("/proxy")
+async def proxy_web(url: str):
+    """
+    Institutional Proxy Tunnel: Bypasses local ISP blocks by routing through the Sentry node.
+    Use with caution.
+    """
+    import httpx
+    from fastapi import Response
+    
+    # Only allow proxying to verified prediction alpha sites
+    allowed_domains = ["polymarket.com", "gamma-api.polymarket.com", "clob.polymarket.com"]
+    if not any(domain in url for domain in allowed_domains):
+        raise HTTPException(status_code=403, detail="Domain not in allowlist for High-Fidelity Proxy.")
+
+    async with httpx.AsyncClient() as client:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        }
+        try:
+            resp = await client.get(url, headers=headers, follow_redirects=True, timeout=10.0)
+            
+            # Simple content injection to fix relative links if it's HTML
+            content = resp.content
+            if "text/html" in resp.headers.get("content-type", ""):
+                content_str = content.decode("utf-8", errors="ignore")
+                # Very basic relative link fix
+                content_str = content_str.replace('href="/', 'href="https://polymarket.com/')
+                content_str = content_str.replace('src="/', 'src="https://polymarket.com/')
+                content = content_str.encode("utf-8")
+
+            return Response(
+                content=content,
+                status_code=resp.status_code,
+                media_type=resp.headers.get("content-type")
+            )
+        except Exception as e:
+            logger.error(f"Proxy failed for {url}: {e}")
+            raise HTTPException(status_code=500, detail=f"Proxy tunnel failed: {str(e)}")
+@router.get("/microstructure")
+async def get_microstructure_data(request: Request, symbol: str = "BTC", user: Optional[User] = Depends(get_current_user)):
+    """
+    Institutional Microstructure Intelligence:
+    Returns real-time CB Premium, CVD history, and Lead-Lag indicators.
+    Now supports multi-asset retrieval via ?symbol=XYZ.
+    """
+    intel_engine = getattr(request.app.state, "intel_engine", None)
+    if not intel_engine:
+        return {"error": "Intel Engine Offline"}
+
+    from src.intel.providers.microstructure import MicrostructureProvider
+    provider = next((p for p in intel_engine.providers if isinstance(p, MicrostructureProvider)), None)
+    
+    if not provider:
+        return {"error": "Microstructure Provider Inactive"}
+
+    # Dynamic State Retrieval
+    try:
+        # Normalize symbol in case it comes as BTC/USD
+        symbol = symbol.split('/')[0].upper()
+        state = await provider.get_symbol_state(symbol)
+    except Exception as e:
+        logger.error(f"Failed to load state for {symbol}: {e}")
+        return {"error": f"Data unavailable for {symbol}"}
+
+    # Basic analytics from scale
+    history = state.get("history", [])
+    current_premium = state.get("cb_premium_bin", 0) 
+    spread_usd = state.get("cb_spread_usd", 0)
+    
+    # Simple risk/bias calculation
+    bias = "neutral"
+    # Only relevant for BTC really, but we can generalize logic later
+    if spread_usd > 30: bias = "institutional_bid"
+    elif spread_usd < -30: bias = "institutional_sell"
+
+    return {
+        "current": {
+            "premium": current_premium,
+            "premium_hl": state.get("cb_premium", 0),
+            "spread_usd": spread_usd,
+            "cvd": state.get("cvd", 0),
+            "open_interest": state.get("open_interest", 0),
+            "depth_walls": state.get("depth_walls", {"bid": [], "ask": []}),
+            "divergence": state.get("divergence", "NONE"),
+            "bias": bias,
+            "sentiment": state.get("sentiment_score", 0.5),
+            "prices": state.get("raw_prices", {}),
+            "ta": state.get("ta", {})
+        },
+        "history": history,
+        "ticker": symbol
+    }

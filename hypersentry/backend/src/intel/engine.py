@@ -7,6 +7,7 @@ from .providers.rss import RSSProvider
 from .providers.twitter import TwitterProvider
 from .providers.telegram import TelegramProvider
 from .providers.polymarket import PolymarketProvider
+from .providers.microstructure import MicrostructureProvider
 from .sentiment import SentimentAnalyzer
 from database import get_db_session
 from models import IntelItem
@@ -23,7 +24,8 @@ class IntelEngine:
             RSSProvider(),
             TwitterProvider(),
             TelegramProvider(),
-            PolymarketProvider()
+            PolymarketProvider(),
+            MicrostructureProvider()
         ]
         self.sentiment_analyzer = SentimentAnalyzer()
         self.cache = set() # To prevent duplicate broadcasts
@@ -61,6 +63,8 @@ class IntelEngine:
                     if isinstance(res, list):
                         for item in res:
                             if item["id"] not in self.cache:
+                                if item.get("source") == "microstructure":
+                                    item["is_high_impact"] = True
                                 new_items.append(item)
                                 self.cache.add(item["id"])
                     elif isinstance(res, Exception):
@@ -74,15 +78,21 @@ class IntelEngine:
                     
                     # Persist to Database (Persistence Layer)
                     try:
+                        import dateutil.parser
                         with get_db_session() as db:
                             for item in new_items:
+                                # Convert ISO string back to datetime for SQLite persistence
+                                dt_timestamp = item["timestamp"]
+                                if isinstance(dt_timestamp, str):
+                                    dt_timestamp = dateutil.parser.isoparse(dt_timestamp)
+                                
                                 db_item = IntelItem(
                                     id=item["id"],
                                     source_type=item.get("source", "unknown"),
-                                    title=item.get("title", "")[:5000],  # Truncate to be safe for Text type if needed, though Text is unlimited usually
+                                    title=item.get("title", "")[:5000],
                                     content=item.get("content", ""),
                                     url=item.get("url", ""),
-                                    timestamp=item["timestamp"],
+                                    timestamp=dt_timestamp,
                                     sentiment=item.get("sentiment", "neutral"),
                                     sentiment_score=item.get("sentiment_score", 0.0),
                                     is_high_impact=item.get("is_high_impact", False),
