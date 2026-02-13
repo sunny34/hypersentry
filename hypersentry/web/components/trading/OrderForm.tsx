@@ -22,6 +22,7 @@ interface OrderFormProps {
     onDeposit?: () => void;
     selectedPrice?: string;
     selectedSize?: string;
+    maxLeverage?: number;
 }
 
 interface OrderOverrideParams {
@@ -44,7 +45,8 @@ export default function OrderForm({
     onDeposit,
     selectedPrice,
     selectedSize,
-    error: sessionError
+    error: sessionError,
+    maxLeverage = 50
 }: OrderFormProps & { error?: string | null }) {
 
     // State
@@ -71,6 +73,7 @@ export default function OrderForm({
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showProMenu, setShowProMenu] = useState(false);
     const proMenuRef = useRef<HTMLDivElement>(null);
+    const [showLevSlider, setShowLevSlider] = useState(false);
     const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
     const [lastExternalPrice, setLastExternalPrice] = useState<string | undefined>();
     const [lastExternalSize, setLastExternalSize] = useState<string | undefined>();
@@ -98,6 +101,14 @@ export default function OrderForm({
     useEffect(() => {
         localStorage.setItem('hl_order_type', orderType);
     }, [orderType]);
+
+    // Safety: Cap leverage if it exceeds max allowed for the asset
+    useEffect(() => {
+        if (leverage > maxLeverage) {
+            setLeverage(maxLeverage);
+        }
+    }, [maxLeverage, leverage]);
+
     // --- END PERSISTENCE ---
 
     /**
@@ -332,7 +343,6 @@ export default function OrderForm({
     useEffect(() => {
         const handleSmartTrade = async (e: any) => {
             const { side: smartSide, reason } = e.detail;
-            console.log(`🧠 [OrderForm Alpha] Intel Action: ${smartSide.toUpperCase()} | Reason: ${reason}`);
 
             setSide(smartSide as 'buy' | 'sell');
             setOrderType('market');
@@ -369,7 +379,6 @@ export default function OrderForm({
 
             // Automated Execution if 1-Click is enabled
             if (isAgentActive && agent) {
-                console.log("⚡️ Terminal Agent: Auto-Executing Smart Intel Order with Risk Guards...");
                 setTimeout(() => {
                     executeOrder({
                         side: smartSide,
@@ -417,7 +426,7 @@ export default function OrderForm({
     const estServiceFee = orderValue * serviceFeeRate;
 
     return (
-        <form onSubmit={handleSubmit} className="flex flex-col h-full gap-4 text-sm select-none">
+        <form onSubmit={handleSubmit} className="flex flex-col h-full gap-3 text-sm select-none overflow-y-auto px-1 custom-scrollbar">
             {/* Strategy Selectors (PRO Level) */}
             <div className="flex bg-white/[0.03] border border-white/5 rounded-xl p-1 gap-1">
                 {['Market', 'Limit', 'TWAP'].map((t) => (
@@ -442,7 +451,7 @@ export default function OrderForm({
                             : 'text-emerald-500/60 hover:text-emerald-400 hover:bg-emerald-500/5'
                             }`}
                     >
-                        {orderType.startsWith('stop') ? 'STOP' : orderType.startsWith('take') ? 'TAKE' : 'PRO'}
+                        {orderType.startsWith('stop') ? 'STOP' : orderType.startsWith('take') ? 'TAKE' : 'ADVANCED'}
                         <ChevronDown className="w-3 h-3" />
                     </button>
                     {showProMenu && (
@@ -459,7 +468,19 @@ export default function OrderForm({
                                         }}
                                         className={`block w-full text-left px-4 py-2 text-[10px] uppercase font-black tracking-widest hover:bg-white/5 ${orderType === ptLower ? 'text-emerald-400' : 'text-gray-500 hover:text-white'}`}
                                     >
-                                        {pt}
+                                        <div className="flex justify-between items-center">
+                                            <span>{pt}</span>
+                                            {Number(size) > 0 && (
+                                                <div className="text-right">
+                                                    <div className="font-mono text-gray-300 font-bold">
+                                                        {`$${(currentPrice * (side === 'buy' ? 0.98 : 1.02)).toFixed(2)}`}
+                                                    </div>
+                                                    <div className="text-[10px] text-gray-500">
+                                                        {side === 'buy' ? '-2%' : '+2%'}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                     </button>
                                 );
                             })}
@@ -469,34 +490,113 @@ export default function OrderForm({
             </div>
 
             {/* Control Strip */}
-            <div className="flex gap-2 items-center">
+            <div className="grid grid-cols-3 gap-2">
                 <button
                     type="button"
                     title="Switch Margin Mode"
                     onClick={() => setMarginMode(m => m === 'cross' ? 'isolated' : 'cross')}
-                    className="flex-1 bg-white/5 hover:bg-white/10 border border-[var(--glass-border)] rounded-lg py-1.5 font-bold text-gray-300 transition text-xs uppercase"
+                    className="col-span-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg h-9 font-bold text-gray-300 transition text-[10px] uppercase tracking-wider flex items-center justify-center hover:border-white/20"
                 >
-                    {marginMode === 'cross' ? 'CROSS' : 'ISOLATED'}
+                    {marginMode === 'cross' ? 'Cross' : 'Isolated'}
                 </button>
-                <div className="w-px h-6 bg-white/10" />
 
-                <div className="flex-[2] flex flex-col bg-white/5 border border-[var(--glass-border)] rounded-lg px-3 py-1.5" title="Adjust Leverage">
-                    <div className="flex items-center justify-between mb-1">
-                        <span className="text-gray-500 text-[9px] font-bold uppercase tracking-tighter">Leverage</span>
-                        <span className="text-white text-xs font-black font-mono">{leverage}x</span>
-                    </div>
-                    <input
-                        type="range"
-                        min="1"
-                        max="50"
-                        step="1"
-                        value={leverage}
-                        onChange={(e) => setLeverage(parseInt(e.target.value))}
-                        className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[var(--color-primary)]"
-                    />
+                <div className="col-span-1 relative">
+                    <button
+                        type="button"
+                        onClick={() => setShowLevSlider(!showLevSlider)}
+                        className={`w-full flex flex-col items-center justify-center bg-white/5 border rounded-lg h-9 px-2 relative group transition-colors ${showLevSlider ? 'border-white/40 bg-white/10' : 'border-white/10 hover:border-white/20'}`}
+                        title="Adjust Leverage"
+                    >
+                        <span className="absolute text-[8px] top-1 left-1.5 text-gray-500 font-bold uppercase tracking-wider">Lev</span>
+                        <span className="text-white text-xs font-black font-mono mt-2">{leverage}x</span>
+                    </button>
+
                 </div>
 
-                {/* Tactical Master Switch - 1-Click Engagement */}
+                {/* Leverage Adjustment Modal */}
+                {showLevSlider && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-[#151517] border border-white/10 rounded-xl w-[400px] shadow-2xl p-6 relative animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+                            {/* Close Button */}
+                            <button
+                                onClick={() => setShowLevSlider(false)}
+                                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+
+                            <h2 className="text-xl font-medium text-white text-center mb-6">Adjust Leverage</h2>
+
+                            <div className="text-center space-y-1 mb-8">
+                                <p className="text-gray-400 text-sm">
+                                    Control the leverage used for <span className="font-bold text-gray-300">{symbol}</span> positions. The maximum leverage is {maxLeverage}x.
+                                </p>
+                                <p className="text-gray-500 text-xs">
+                                    Max position size decreases the higher your leverage.
+                                </p>
+                            </div>
+
+                            {/* Slider Section */}
+                            <div className="flex items-center gap-4 mb-8">
+                                <div className="relative flex-1 h-6 flex items-center">
+                                    {/* Track */}
+                                    <div className="absolute w-full h-1.5 bg-[#2a2a2e] rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-[var(--color-primary)] transition-all duration-75"
+                                            style={{ width: `${(leverage / maxLeverage) * 100}%` }}
+                                        />
+                                    </div>
+                                    {/* Native Slider (Invisible but functional) */}
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max={maxLeverage}
+                                        step="1"
+                                        value={leverage}
+                                        onChange={(e) => setLeverage(parseInt(e.target.value))}
+                                        className="absolute w-full h-full opacity-0 cursor-pointer z-10"
+                                    />
+                                    {/* Thumb visualization could go here if needed, but native opacity-0 slider works for interaction */}
+                                    <div
+                                        className="absolute w-4 h-4 bg-[var(--color-primary)] border-2 border-[#151517] rounded-full pointer-events-none transition-all duration-75 shadow-[0_0_10px_rgba(45,212,191,0.5)]"
+                                        style={{ left: `calc(${(leverage / maxLeverage) * 100}% - 8px)` }}
+                                    />
+                                </div>
+
+                                <div className="bg-[#2a2a2e] border border-white/5 rounded px-3 py-1.5 min-w-[60px] flex items-center justify-between">
+                                    <input
+                                        type="number"
+                                        value={leverage}
+                                        onChange={(e) => {
+                                            const val = Math.min(Math.max(1, parseInt(e.target.value) || 1), maxLeverage);
+                                            setLeverage(val);
+                                        }}
+                                        className="bg-transparent text-white font-mono font-bold text-sm w-full focus:outline-none text-center"
+                                    />
+                                    <span className="text-gray-500 text-xs ml-1">x</span>
+                                </div>
+                            </div>
+
+                            {/* Confirm Button */}
+                            <button
+                                type="button"
+                                onClick={() => setShowLevSlider(false)}
+                                className="w-full py-3 bg-[var(--color-primary)] hover:opacity-90 text-black font-bold rounded-lg transition-all mb-4 text-sm"
+                            >
+                                Confirm
+                            </button>
+
+                            {/* Risk Warning */}
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-center">
+                                <p className="text-red-400/80 text-xs">
+                                    Note that setting a higher leverage increases the risk of liquidation.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Tactical Master Switch */}
                 <button
                     type="button"
                     onClick={async () => {
@@ -508,34 +608,17 @@ export default function OrderForm({
                         }
                     }}
                     title={isAgentActive ? "Master Trade Engine Online" : "Click to Engage Master Engine"}
-                    className={`group relative flex flex-col items-center justify-center gap-1.5 px-3 py-2 border rounded-xl transition-all duration-500 self-stretch min-w-[70px] overflow-hidden ${isAgentActive
+                    className={`col-span-1 h-9 rounded-lg border transition-all duration-300 flex items-center justify-center gap-2 overflow-hidden relative ${isAgentActive
                         ? 'bg-emerald-500/10 border-emerald-500/30'
                         : isConnected
-                            ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/10 cursor-pointer'
+                            ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/10'
                             : 'bg-white/5 border-white/10 opacity-40 cursor-not-allowed'
                         }`}
                 >
-                    {/* Switch Visual Status node */}
-                    <div className="flex items-center gap-1.5">
-                        <div className={`w-3 h-3 rounded-full flex items-center justify-center border transition-all duration-500 ${isAgentActive ? 'bg-emerald-500 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.8)]' : isConnected ? 'bg-amber-900 border-amber-700' : 'bg-gray-800 border-gray-700'
-                            }`}>
-                            {isAgentActive && <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />}
-                        </div>
-                        <span className={`text-[11px] font-black tracking-tighter uppercase transition-colors duration-300 ${isAgentActive ? 'text-emerald-400' : isConnected ? 'text-amber-500/80 group-hover:text-amber-400' : 'text-gray-600'
-                            }`}>
-                            {isAgentActive ? 'ACTIVE' : 'ENGAGE'}
-                        </span>
-                    </div>
-
-                    {/* Sub-label for Engine Type */}
-                    <span className={`text-[8px] font-bold uppercase tracking-[0.2em] transition-colors duration-300 ${isAgentActive ? 'text-emerald-500/50' : 'text-gray-600'}`}>
-                        1-Click
+                    <div className={`w-2 h-2 rounded-full ${isAgentActive ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-gray-600'}`} />
+                    <span className={`text-[9px] font-black tracking-widest uppercase ${isAgentActive ? 'text-emerald-400' : 'text-gray-400'}`}>
+                        {isAgentActive ? 'ON' : '1-Click'}
                     </span>
-
-                    {/* Active State Scanline Animation */}
-                    {isAgentActive && (
-                        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-emerald-400/5 to-transparent h-[100%] w-full animate-scanline pointer-events-none" />
-                    )}
                 </button>
             </div>
 
@@ -591,39 +674,39 @@ export default function OrderForm({
             </div>
 
             {/* Numeric Controls */}
-            <div className="space-y-3">
-                {(orderType === 'limit' || orderType === 'stop_limit' || orderType === 'take_limit') && (
-                    <div className="bg-[var(--background)]/50 border border-[var(--glass-border)] rounded-lg px-3 py-2 flex items-center justify-between">
-                        <span className="text-gray-500 text-[10px] font-bold uppercase">Price</span>
-                        <div className="flex items-center gap-2">
+            <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                    {(orderType === 'limit' || orderType === 'stop_limit' || orderType === 'take_limit') && (
+                        <div className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 flex flex-col justify-center transition-colors hover:border-white/20">
+                            <span className="text-gray-500 text-[9px] font-bold uppercase tracking-wider mb-0.5">Price (USD)</span>
                             <input
                                 type="number"
                                 value={price}
                                 onChange={(e) => setPrice(e.target.value)}
                                 placeholder={currentPrice.toFixed(2)}
-                                className="bg-transparent text-right font-mono text-xs focus:outline-none w-24 text-white"
+                                className="bg-transparent font-mono text-sm font-bold text-white focus:outline-none w-full placeholder:text-gray-700"
                             />
-                            <span className="text-gray-500 text-[9px] font-bold">USD</span>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                <div className="bg-[var(--background)]/50 border border-[var(--glass-border)] rounded-lg px-3 py-2 flex items-center justify-between">
-                    <span className="text-gray-500 text-[10px] font-bold uppercase">Size</span>
-                    <div className="flex items-center gap-2">
+                    <div className={`bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 flex flex-col justify-center transition-colors hover:border-white/20 ${(orderType === 'limit' || orderType === 'stop_limit' || orderType === 'take_limit') ? '' : 'col-span-2'}`}>
+                        <div className="flex justify-between items-center mb-0.5">
+                            <span className="text-gray-500 text-[9px] font-bold uppercase tracking-wider">Size ({symbol})</span>
+                            {/* Quick fill buttons could go here */}
+                        </div>
                         <input
                             id="size-input"
                             type="number"
                             value={size}
                             onChange={(e) => setSize(e.target.value)}
                             placeholder="0.00"
-                            className="bg-transparent text-right font-mono text-xs focus:outline-none w-24 text-white transition-all duration-300 rounded"
+                            className="bg-transparent font-mono text-sm font-bold text-white focus:outline-none w-full placeholder:text-gray-700 transition-all duration-300 rounded"
                         />
-                        <span className="text-gray-500 text-[9px] font-bold">{symbol}</span>
                     </div>
                 </div>
 
-                <div className="px-1 group">
+                {/* Slider - Slimmer */}
+                <div className="px-1 group py-1">
                     <input
                         type="range"
                         min="0"
@@ -637,7 +720,7 @@ export default function OrderForm({
                             setSize(calcSize.toFixed(4));
                         }}
                     />
-                    <div className="flex justify-between text-[8px] text-white/20 mt-2 font-black uppercase tracking-tighter group-hover:text-white/40 transition-colors">
+                    <div className="flex justify-between text-[8px] text-white/20 mt-1 font-black uppercase tracking-tighter group-hover:text-white/40 transition-colors">
                         <span>0%</span>
                         <span>25%</span>
                         <span>50%</span>
@@ -815,7 +898,9 @@ export default function OrderForm({
                 </div>
                 <div className="flex justify-between text-[10px]">
                     <span className="text-gray-600 uppercase font-bold tracking-tighter">Est. Liq</span>
-                    <span className="text-[var(--color-accent-orange)] font-mono font-bold">${liqPrice.toFixed(2)}</span>
+                    <span className="text-[var(--color-accent-orange)] font-mono font-bold">
+                        {(size && parseFloat(size) > 0) ? `$${liqPrice.toFixed(2)}` : '--'}
+                    </span>
                 </div>
                 <div className="flex justify-between text-[10px]">
                     <span className="text-gray-600 uppercase font-bold tracking-tighter">Network Fee</span>

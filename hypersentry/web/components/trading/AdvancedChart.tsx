@@ -56,7 +56,9 @@ function AdvancedChart({
     activeIndicators = new Set(['EMA 50', 'EMA 200', 'Supertrend', 'Volume']),
     onToggleIndicator,
     isHudMinimized,
-    onNavigate
+    onNavigate,
+    positions = [],
+    openOrders = []
 }: AdvancedChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
@@ -79,6 +81,11 @@ function AdvancedChart({
     // New Refs for CVD and Premium
     const cvdSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
     const premiumSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+
+    // Trading Markers Refs
+    const positionLinesRef = useRef<any[]>([]);
+    const orderLinesRef = useRef<any[]>([]);
+    const liquidationLinesRef = useRef<any[]>([]);
 
     const [candlesticks, setCandlesticks] = useState<any[]>([]);
     const [visibleRange, setVisibleRange] = useState<{ min: number; max: number } | null>(null);
@@ -143,6 +150,93 @@ function AdvancedChart({
             if (removeListener) removeListener();
         };
     }, [symbol, subscribe, addListener]);
+
+    // 7. Render Positions & Orders & Walls on Chart
+    useEffect(() => {
+        if (!candlestickSeriesRef.current) return;
+
+        // Clear existing lines
+        [...positionLinesRef.current, ...orderLinesRef.current, ...wallSeriesRef.current].forEach(line => {
+            // Safe removal check
+            try { candlestickSeriesRef.current?.removePriceLine(line); } catch (e) { }
+        });
+        positionLinesRef.current = [];
+        orderLinesRef.current = [];
+        wallSeriesRef.current = [];
+
+        // A. Render Open Positions
+        if (positions && positions.length > 0) {
+            positions.forEach(pos => {
+                if (pos.coin === symbol) {
+                    const size = parseFloat(pos.size || pos.szi);
+                    const entryPrice = parseFloat(pos.entryPx || pos.entryPrice);
+                    if (size !== 0) {
+                        const isLong = size > 0;
+                        const line = candlestickSeriesRef.current?.createPriceLine({
+                            price: entryPrice,
+                            color: isLong ? COLORS.bullish : COLORS.bearish,
+                            lineWidth: 2,
+                            lineStyle: LineStyle.Solid,
+                            axisLabelVisible: true,
+                            title: `${isLong ? 'LONG' : 'SHORT'} ${Math.abs(size)}`,
+                        });
+                        if (line) positionLinesRef.current.push(line);
+                    }
+                }
+            });
+        }
+
+        // B. Render Open Orders
+        if (openOrders && openOrders.length > 0) {
+            openOrders.forEach(order => {
+                if (order.coin === symbol) {
+                    const price = parseFloat(order.limitPx || order.price);
+                    const size = parseFloat(order.sz || order.size);
+                    const isBuy = order.side === 'B' || order.side === 'buy';
+
+                    const line = candlestickSeriesRef.current?.createPriceLine({
+                        price: price,
+                        color: isBuy ? '#3b82f6' : '#f59e0b', // Blue for Buy, Amber for Sell
+                        lineWidth: 1,
+                        lineStyle: LineStyle.Dashed,
+                        axisLabelVisible: true,
+                        title: `${isBuy ? 'BID' : 'OFFER'} ${size}`,
+                    });
+                    if (line) orderLinesRef.current.push(line);
+                }
+            });
+        }
+
+        // C. Render Liquidity Walls (Top 3 Bids/Asks by size)
+        if (showWalls && l2Levels.bids.length > 0) {
+            // Find significant walls (outliers > 2x avg of top 20 or simply large relative to current view)
+            // Simple heuristic: Top 3 largest orders in the visible book
+
+            // Sort by size desc
+            const topBids = [...l2Levels.bids].sort((a, b) => parseFloat(b.sz) - parseFloat(a.sz)).slice(0, 3);
+            const topAsks = [...l2Levels.asks].sort((a, b) => parseFloat(b.sz) - parseFloat(a.sz)).slice(0, 3);
+
+            [...topBids, ...topAsks].forEach(level => {
+                const px = parseFloat(level.px);
+                const sz = parseFloat(level.sz);
+                const isBid = l2Levels.bids.includes(level);
+
+                // Only show if substantial (e.g. > $50k value - this threshold should be dynamic but hardcoded for now)
+                if (px * sz > 10000) {
+                    const line = candlestickSeriesRef.current?.createPriceLine({
+                        price: px,
+                        color: isBid ? 'rgba(16, 185, 129, 0.3)' : 'rgba(244, 63, 94, 0.3)',
+                        lineWidth: sz > 1000 ? 2 : 1, // Thicker for massive walls
+                        lineStyle: LineStyle.Dotted,
+                        axisLabelVisible: false, // Don't clutter axis
+                        title: `Wall: ${Number(sz).toFixed(2)}`,
+                    });
+                    if (line) wallSeriesRef.current.push(line);
+                }
+            });
+        }
+
+    }, [positions, openOrders, l2Levels, showWalls, symbol]);
 
     // ... (Nexus Signals effect remains same)
 
@@ -309,14 +403,24 @@ function AdvancedChart({
 
         const chart = createChart(chartContainerRef.current, {
             layout: {
-                background: { type: ColorType.Solid, color: '#000000' }, // EXPLICIT BLACK BACKGROUND
+                background: { type: ColorType.VerticalGradient, topColor: '#1a1a1a', bottomColor: '#000000' }, // Cyberpunk depth
                 textColor: COLORS.textBright,
                 fontSize: 11,
                 fontFamily: "'JetBrains Mono', 'SF Mono', monospace",
             },
             grid: {
-                vertLines: { color: COLORS.grid, style: LineStyle.Solid },
-                horzLines: { color: COLORS.grid, style: LineStyle.Solid },
+                vertLines: { color: 'rgba(255, 255, 255, 0.03)', style: LineStyle.Dotted }, // Subtle dotted grid
+                horzLines: { color: 'rgba(255, 255, 255, 0.03)', style: LineStyle.Dotted },
+            },
+            watermark: {
+                color: 'rgba(255, 255, 255, 0.03)',
+                visible: true,
+                text: 'HYPERSENTRY',
+                fontSize: 96,
+                horzAlign: 'center',
+                vertAlign: 'center',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontStyle: 'italic',
             },
             crosshair: {
                 mode: CrosshairMode.Normal,
@@ -473,16 +577,17 @@ function AdvancedChart({
         */
 
         // Candlestick Series LAST
+        // Candlestick Series LAST
         const candlestickSeries = chart.addCandlestickSeries({
             upColor: COLORS.bullish,
             downColor: COLORS.bearish,
             borderVisible: false,
-            wickUpColor: COLORS.bullishWick,
-            wickDownColor: COLORS.bearishWick,
+            wickUpColor: COLORS.bullish,
+            wickDownColor: COLORS.bearish,
             priceLineVisible: true,
             priceLineWidth: 1,
-            priceLineColor: '#3b82f6',
-            priceLineStyle: LineStyle.Dashed,
+            priceLineColor: COLORS.bullish, // Match last candle
+            priceLineStyle: LineStyle.Dotted,
         });
 
         chartRef.current = chart;
@@ -518,7 +623,8 @@ function AdvancedChart({
         });
 
         // Resize
-        const handleResize = () => {
+        // Resize Observer for Container
+        const resizeObserver = new ResizeObserver(() => {
             if (chartContainerRef.current && chartRef.current) {
                 chartRef.current.applyOptions({
                     width: chartContainerRef.current.clientWidth,
@@ -526,9 +632,12 @@ function AdvancedChart({
                 });
                 updateRange();
             }
-        };
+        });
 
-        window.addEventListener('resize', handleResize);
+        if (chartContainerRef.current) {
+            resizeObserver.observe(chartContainerRef.current);
+        }
+
         chart.timeScale().subscribeVisibleLogicalRangeChange(() => setTimeout(updateRange, 100));
 
         // Click to select price
@@ -540,7 +649,7 @@ function AdvancedChart({
         });
 
         return () => {
-            window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
             try {
                 chart.remove();
             } catch {
@@ -572,7 +681,6 @@ function AdvancedChart({
 
         const fetchData = async () => {
             // Debug log
-            console.log(`[Chart] Fetching candles for ${symbol} ${interval}`);
 
             setIsLoading(true);
             setError(null);
@@ -587,7 +695,6 @@ function AdvancedChart({
 
                 // Use the API_URL constant
                 const url = `${API_URL}/trading/candles`;
-                console.log(`[Chart] Request: ${url}`);
 
                 const res = await axios.post(url, {
                     token: symbol,
@@ -596,7 +703,6 @@ function AdvancedChart({
                     end_time: Math.floor(Date.now())
                 });
 
-                console.log("Raw API response:", res.data);
 
                 if (!isActive) return;
 
@@ -634,13 +740,13 @@ function AdvancedChart({
 
                         // Restore Candlesticks
                         if (candlestickSeriesRef.current) {
+                            // Enforce premium style on update
                             candlestickSeriesRef.current.applyOptions({
-                                upColor: '#26a69a',
-                                downColor: '#ef5350',
-                                borderVisible: true,
-                                borderColor: '#ffffff', // High visibility border
-                                wickUpColor: '#ffffff',
-                                wickDownColor: '#ffffff'
+                                upColor: COLORS.bullish,
+                                downColor: COLORS.bearish,
+                                borderVisible: false,
+                                wickUpColor: COLORS.bullish, // Match body
+                                wickDownColor: COLORS.bearish, // Match body
                             });
                             candlestickSeriesRef.current.setData(formatted);
                             // lastCandleRef already set
@@ -1117,21 +1223,36 @@ function AdvancedChart({
 
 function IntelTicker({ onNavigate }: { onNavigate?: (tab: string) => void }) {
     const [index, setIndex] = useState(0);
-    const items = [
-        { type: 'news', text: 'BTC Spot ETF net inflows reach $500M daily average', sentiment: 'bullish' },
-        { type: 'prediction', text: 'Fed Rate Cut Probability (March): 32% YES', sentiment: 'bearish' },
-        { type: 'news', text: 'Hyperliquid V2 mainnet launch scheduled for Q4', sentiment: 'bullish' },
-        { type: 'prediction', text: 'ETH to flip BTC market cap in 2026? 15% YES', sentiment: 'neutral' },
-    ];
+    const [items, setItems] = useState<any[]>([]);
 
     useEffect(() => {
+        const fetchTicker = async () => {
+            try {
+                const res = await axios.get(`${API_URL}/intel/ticker`);
+                if (Array.isArray(res.data) && res.data.length > 0) {
+                    setItems(res.data);
+                }
+            } catch (e) {
+                // Silent fail for ticker
+            }
+        };
+
+        fetchTicker();
+        const poll = setInterval(fetchTicker, 30000);
+        return () => clearInterval(poll);
+    }, []);
+
+    useEffect(() => {
+        if (items.length <= 1) return;
         const interval = setInterval(() => {
             setIndex((prev) => (prev + 1) % items.length);
         }, 5000); // Cycle every 5 seconds
         return () => clearInterval(interval);
-    }, []);
+    }, [items.length]);
 
-    const item = items[index];
+    if (items.length === 0) return null;
+
+    const item = items[index % items.length];
 
     return (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40">
@@ -1148,7 +1269,7 @@ function IntelTicker({ onNavigate }: { onNavigate?: (tab: string) => void }) {
                 </div>
                 <div className="flex flex-col items-start min-w-[200px]">
                     <span className="text-[8px] text-gray-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                        {item.type === 'news' ? 'Live Wire' : 'Polymarket Pulse'}
+                        {item.type === 'news' ? '' : 'Polymarket Pulse'}
                         <span className={`w-1 h-1 rounded-full ${item.sentiment === 'bullish' ? 'bg-emerald-500' : item.sentiment === 'bearish' ? 'bg-red-500' : 'bg-gray-500'}`} />
                     </span>
                     <span className="text-[11px] text-gray-200 font-medium truncate max-w-[250px]">
