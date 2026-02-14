@@ -52,6 +52,7 @@ export default function CommandPalette({ tokens, onSelectToken, onExecuteCommand
         { id: 'risk', title: 'RISK', description: 'Monte Carlo Portfolio Simulator', shortcut: '/risk' },
         { id: 'debate', title: 'DEBATE', description: 'Bull vs Bear Intelligence Debate', shortcut: '/debate' },
         { id: 'twap', title: 'TWAP', description: 'Algorithmic Execution Hub', shortcut: '/twap' },
+        { id: 'zen', title: 'ZEN', description: 'Toggle Focus Mode (Zen Mode)', shortcut: '/zen' },
     ];
 
     const isCommandMode = query.startsWith('/');

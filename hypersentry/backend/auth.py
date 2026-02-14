@@ -22,7 +22,13 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
 # JWT Configuration
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+_jwt_secret = os.getenv("JWT_SECRET_KEY")
+if not _jwt_secret or _jwt_secret.startswith("change-this") or _jwt_secret.startswith("your-secret"):
+    if os.getenv("ENVIRONMENT") == "production":
+        raise RuntimeError("FATAL: JWT_SECRET_KEY must be set in production. Generate with: openssl rand -hex 32")
+    _jwt_secret = "dev-only-insecure-key-do-not-use-in-production"
+
+JWT_SECRET_KEY = _jwt_secret
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("SESSION_EXPIRE_HOURS", "168"))  # 7 days default
 

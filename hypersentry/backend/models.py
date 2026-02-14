@@ -194,3 +194,38 @@ class MicrostructureSnapshot(Base):
             "spread_usd": self.premium_usd,
             "price": self.price
         }
+
+class TradeSignal(Base):
+    """
+    Persisted AI Trading Signals to track performance accuracy.
+    """
+    __tablename__ = 'trade_signals'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    token = Column(String(20), nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    
+    recommendation = Column(String(50), nullable=False) # STRONG BUY, ACCUMULATE, etc.
+    entry_price = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=False)
+    take_profit_1 = Column(Float, nullable=False)
+    take_profit_2 = Column(Float, nullable=True)
+    
+    alpha_score = Column(Float, default=0.0)
+    confidence_label = Column(String(50), default="MEDIUM")
+    
+    # Tracking
+    result = Column(String(20), default="PENDING") # PENDING, WIN, LOSS, EXPIRED
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    pnl_percent = Column(Float, default=0.0)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "token": self.token,
+            "timestamp": self.timestamp.isoformat(),
+            "recommendation": self.recommendation,
+            "entry": self.entry_price,
+            "result": self.result,
+            "pnl": self.pnl_percent
+        }

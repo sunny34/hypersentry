@@ -11,6 +11,7 @@ interface DashboardPanelProps {
     onClosePosition: (pos: any) => void;
     onCancelOrder: (order: any) => void;
     onAnalyze?: (pos: any) => void;
+    onAdjustPosition?: (pos: any) => void;
     activeTabOverride?: 'positions' | 'orders' | 'history' | 'balances';
 }
 
@@ -23,6 +24,7 @@ export default function DashboardPanel({
     onClosePosition,
     onCancelOrder,
     onAnalyze,
+    onAdjustPosition,
     activeTabOverride
 }: DashboardPanelProps) {
     const [localTab, setLocalTab] = useState<'positions' | 'orders' | 'history' | 'balances'>('positions');
@@ -91,8 +93,38 @@ export default function DashboardPanel({
             {/* Content Area */}
             <div className="flex-1 overflow-auto bg-black/20">
                 {!isAuthenticated ? (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                        <p className="font-medium">Connect wallet to view {activeTab}</p>
+                    <div className="flex flex-col h-full">
+                        <div className="p-4 border-b border-gray-800/50 flex items-center justify-between">
+                            <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest">Market Intelligence</h3>
+                            <div className="px-2 py-1 rounded bg-blue-500/10 border border-blue-500/20 text-[10px] font-bold text-blue-400">
+                                LIVE PREVIEW
+                            </div>
+                        </div>
+                        <div className="flex-1 p-6 flex flex-col items-center justify-center gap-6">
+                            <div className="text-center space-y-2">
+                                <h4 className="text-xl font-bold text-white">Connect to View Your Positions</h4>
+                                <p className="text-sm text-gray-400 max-w-xs mx-auto">
+                                    Access your portfolio, active orders, and trade history securely via your wallet.
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+                                <div className="p-4 rounded-xl bg-white/5 border border-white/5 flex flex-col gap-2">
+                                    <span className="text-[10px] uppercase font-black text-gray-500">Top Gainer (24h)</span>
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-bold text-white">BTC</span>
+                                        <span className="text-emerald-400 font-mono font-bold">+4.2%</span>
+                                    </div>
+                                </div>
+                                <div className="p-4 rounded-xl bg-white/5 border border-white/5 flex flex-col gap-2">
+                                    <span className="text-[10px] uppercase font-black text-gray-500">Whale Activity</span>
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-bold text-white">High</span>
+                                        <span className="text-blue-400 font-mono font-bold">12 Alerts</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 ) : (
                     <>
@@ -144,6 +176,7 @@ export default function DashboardPanel({
                                     onSelectToken={onSelectToken}
                                     onClose={(pos) => onClosePosition(pos.raw)}
                                     onAnalyze={(pos) => onAnalyze && onAnalyze(pos.raw)}
+                                    onAdjust={(pos) => onAdjustPosition && onAdjustPosition(pos.raw)}
                                 />
                             </div>
                         )}

@@ -170,9 +170,33 @@ export default function RiskSimulator() {
         <div className="flex flex-col lg:flex-row gap-6 h-full p-6 text-gray-200">
             {/* Controls Panel */}
             <div className="w-full lg:w-80 flex flex-col gap-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800 backdrop-blur-sm h-fit">
-                <div className="flex items-center gap-2 mb-2">
-                    <Activity className="text-blue-500" />
-                    <h2 className="text-xl font-bold">Parameters</h2>
+                <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                        <Activity className="text-blue-500" />
+                        <h2 className="text-xl font-bold">Parameters</h2>
+                    </div>
+                </div>
+
+                {/* Presets */}
+                <div className="grid grid-cols-3 gap-2">
+                    <button
+                        onClick={() => setParams(p => ({ ...p, winRate: 60, riskPerTrade: 1, rewardRatio: 1.5, numTrades: 100 }))}
+                        className="px-2 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[10px] font-bold uppercase rounded border border-green-500/20 transition-colors"
+                    >
+                        Conservative
+                    </button>
+                    <button
+                        onClick={() => setParams(p => ({ ...p, winRate: 50, riskPerTrade: 2, rewardRatio: 2.5, numTrades: 100 }))}
+                        className="px-2 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-[10px] font-bold uppercase rounded border border-blue-500/20 transition-colors"
+                    >
+                        Moderate
+                    </button>
+                    <button
+                        onClick={() => setParams(p => ({ ...p, winRate: 35, riskPerTrade: 5, rewardRatio: 5, numTrades: 50 }))}
+                        className="px-2 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-[10px] font-bold uppercase rounded border border-purple-500/20 transition-colors"
+                    >
+                        Degen
+                    </button>
                 </div>
 
                 <div className="space-y-4">

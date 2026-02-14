@@ -15,6 +15,42 @@ router = APIRouter(prefix="/intel", tags=["Intelligence"])
 async def ping_intel():
     return {"status": "alive"}
 
+@router.get("/debug")
+async def debug_intel(request: Request):
+    """
+    Debug endpoint to check active token monitoring status.
+    """
+    engine = getattr(request.app.state, "intel_engine", None)
+    if not engine: return {"status": "no engine"}
+    
+    # Calculate uptime and tracked tokens
+    active_providers = [p.name for p in engine.providers]
+    
+    micro = next((p for p in engine.providers if p.name == "microstructure"), None)
+    tracked_count = len(micro.active_symbols) if micro else 0
+    sample = list(micro.active_symbols)[:10] if micro else []
+    
+    return {
+        "status": "online",
+        "providers": active_providers,
+        "microstructure": {
+            "tracked_tokens": tracked_count,
+            "sample": sample,
+            "surge_scan_active": True
+        }
+    }
+
+@router.get("/pulse")
+async def get_intel_pulse(request: Request):
+    """
+    Get the real-time Global Market Pulse (0-100 score).
+    """
+    intel_engine = getattr(request.app.state, "intel_engine", None)
+    if not intel_engine:
+        return {"score": 50, "label": "Offline", "breakdown": {}}
+    
+    return intel_engine.get_global_sentiment()
+
 @router.get("/latest")
 async def get_latest_intel(request: Request, limit: int = 20):
     """
@@ -52,6 +88,56 @@ async def get_latest_intel(request: Request, limit: int = 20):
     except Exception as e:
         logger.error(f"Failed to fetch intel: {e}")
         return []
+
+@router.get("/ticker")
+async def get_intel_ticker(request: Request, limit: int = 12):
+    """
+    Get a simplified stream of high-signal items for the frontend ticker.
+    Mixes Breaking News (RSS/Social) and Prediction Markets.
+    """
+    intel_engine = getattr(request.app.state, "intel_engine", None)
+    if not intel_engine:
+        return []
+
+    items = []
+    # Use recent_items cache
+    if hasattr(intel_engine, "recent_items"):
+        raw_items = intel_engine.recent_items
+        
+        # Filter for relevant sources
+        relevant = [
+            i for i in raw_items 
+            if i.get("source") in ["RSS", "Twitter", "Telegram", "Polymarket"] or i.get("is_high_impact")
+        ]
+        
+        # Sort by timestamp descending
+        relevant.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        # Format for ticker
+        for item in relevant[:limit]:
+            source = item.get("source", "Unknown")
+            is_prediction = source == "Polymarket" or item.get("metadata", {}).get("type") == "prediction"
+            
+            # Formulate text
+            text = item.get("title", "")
+            if is_prediction:
+                # Clean up title "Prediction: " prefix if present to save space
+                text = text.replace("Prediction: ", "")
+                # Add probability if available
+                prob = item.get("metadata", {}).get("probability")
+                if prob:
+                    text = f"{text}: {prob:.1f}% YES"
+            
+            items.append({
+                "id": str(item.get("id")),
+                "type": "prediction" if is_prediction else "news",
+                "text": text,
+                "sentiment": item.get("sentiment", "neutral"),
+                "url": item.get("url", ""),
+                "timestamp": str(item.get("timestamp"))
+            })
+            
+    return items
 
 @router.get("/sources")
 async def get_intel_sources(request: Request):
@@ -195,19 +281,79 @@ async def deobfuscate_signal(
         db.commit()
 
     from src.intel.nexus import nexus
-    return nexus.get_alpha_confluence()
+    all_signals = await nexus.get_alpha_confluence()
+    
+    # Only reveal the specific signal that matches the obfuscated token pattern
+    # Obfuscation format: first char + asterisks (e.g., "B**" for "BTC")
+    obfuscated = request.token_obfuscated
+    matching = [
+        s for s in all_signals 
+        if len(s["token"]) == len(obfuscated) and s["token"][0] == obfuscated[0]
+    ]
+    
+    return matching if matching else all_signals[:1]  # Fallback to first signal if no exact match
 
 @router.get("/debate/{symbol}")
-async def get_agent_debate(symbol: str, _user: User = Depends(require_pro_user)):
+async def get_agent_debate(symbol: str, request: Request, _user: User = Depends(require_pro_user)):
     """
     Trigger a live multi-agent debate for a specific asset.
-    Inspired by the TauricResearch/TradingAgents multi-agent setup.
+    Feeds agents REAL market context for production-grade analysis.
     """
     from src.agents.debate import MultiAgentDebate
     
     engine = MultiAgentDebate()
-    # Mock context for now - in production we'd pass recent prices/news
-    context = f"Asset {symbol} is experiencing high volatility near local resistance."
+    
+    # Build REAL context from live data sources
+    # Build REAL context from live data sources
+    intel_engine = getattr(request.app.state, "intel_engine", None)
+    context_parts = [f"Asset: {symbol.upper()}"]
+    
+    if intel_engine:
+        # 1. Recent news about this symbol
+        # Use simple string matching for now
+        news_items = []
+        if hasattr(intel_engine, "recent_items"):
+            news_items = [
+                i.get("title", "") for i in intel_engine.recent_items 
+                if symbol.upper() in (i.get("title", "") or "").upper()
+            ][:3]
+        if news_items:
+            context_parts.append(f"Recent News: {'; '.join(news_items)}")
+        
+        # 2. Prediction market data
+        predictions = []
+        if hasattr(intel_engine, "recent_items"):
+            predictions = [
+                f"{i.get('title','')}: {i.get('metadata',{}).get('probability',0):.0f}% YES"
+                for i in intel_engine.recent_items
+                if i.get("metadata", {}).get("type") == "prediction" and symbol.upper() in (i.get("title", "") or "").upper()
+            ][:2]
+        if predictions:
+            context_parts.append(f"Prediction Markets: {'; '.join(predictions)}")
+        
+        # 3. Microstructure data (price, CVD, premium)
+        from src.intel.providers.microstructure import MicrostructureProvider
+        micro = next((p for p in intel_engine.providers if isinstance(p, MicrostructureProvider)), None)
+        
+        if micro and symbol.upper() in micro.states:
+            state = micro.states[symbol.upper()]
+            prices = state.get("raw_prices", {})
+            context_parts.append(f"Current Price: ${prices.get('binance', 'N/A')}")
+            context_parts.append(f"CVD (Cumulative Volume Delta): {state.get('cvd', 0):,.0f}")
+            context_parts.append(f"Coinbase Premium: {state.get('cb_spread_usd', 0):.2f} USD")
+            context_parts.append(f"Open Interest: {state.get('open_interest', 0):,.0f}")
+            
+            # Order book walls
+            walls = state.get("depth_walls", {})
+            bids = walls.get("bid", [])
+            asks = walls.get("ask", [])
+            
+            if bids:
+                context_parts.append(f"Major Support Wall: ${bids[0].get('price', 'N/A')} ({bids[0].get('size_usd', 0):,.0f} USD)")
+            if asks:
+                context_parts.append(f"Major Resistance Wall: ${asks[0].get('price', 'N/A')} ({asks[0].get('size_usd', 0):,.0f} USD)")
+    
+    context = " | ".join(context_parts)
     
     try:
         messages = await engine.run_debate(symbol, context)
@@ -224,11 +370,18 @@ async def proxy_web(url: str):
     """
     import httpx
     from fastapi import Response
+    from urllib.parse import urlparse
     
-    # Only allow proxying to verified prediction alpha sites
-    allowed_domains = ["polymarket.com", "gamma-api.polymarket.com", "clob.polymarket.com"]
-    if not any(domain in url for domain in allowed_domains):
-        raise HTTPException(status_code=403, detail="Domain not in allowlist for High-Fidelity Proxy.")
+    # Strict domain validation using URL parsing (prevents SSRF bypass)
+    allowed_domains = {"polymarket.com", "gamma-api.polymarket.com", "clob.polymarket.com"}
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme in ("http", "https"):
+            raise HTTPException(status_code=400, detail="Invalid URL scheme.")
+        if parsed.hostname not in allowed_domains:
+            raise HTTPException(status_code=403, detail=f"Domain '{parsed.hostname}' not in allowlist.")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed URL.")
 
     async with httpx.AsyncClient() as client:
         headers = {
@@ -298,6 +451,8 @@ async def get_microstructure_data(request: Request, symbol: str = "BTC", user: O
             "premium_hl": state.get("cb_premium", 0),
             "spread_usd": spread_usd,
             "cvd": state.get("cvd", 0),
+            "cvd_binance": state.get("cvd_binance", state.get("cvd", 0)),
+            "cvd_coinbase": state.get("cvd_coinbase", 0),
             "open_interest": state.get("open_interest", 0),
             "depth_walls": state.get("depth_walls", {"bid": [], "ask": []}),
             "divergence": state.get("divergence", "NONE"),

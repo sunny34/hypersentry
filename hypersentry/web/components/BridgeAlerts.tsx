@@ -138,7 +138,7 @@ export default function BridgeAlerts({ apiUrl }: BridgeAlertsProps) {
                     <div>
                         <h3 className="text-lg font-bold text-white">Large Bridge Deposits</h3>
                         <p className="text-gray-500 text-sm">
-                            Deposits ≥ {stats ? formatDollar(stats.threshold) : '$3M'}
+                            Deposits ≥ {stats ? formatDollar(stats.threshold) : '$100K'}
                         </p>
                     </div>
                 </div>
@@ -167,7 +167,7 @@ export default function BridgeAlerts({ apiUrl }: BridgeAlertsProps) {
                     <Warehouse className="w-12 h-12 mx-auto mb-3 opacity-50" />
                     <p>No large bridges detected yet</p>
                     <p className="text-sm text-gray-600 mt-1">
-                        Monitoring for deposits ≥ $3M
+                        Monitoring for high-value deposits
                     </p>
                 </div>
             ) : (

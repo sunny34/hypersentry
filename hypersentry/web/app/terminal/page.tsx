@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import Sidebar from '@/components/Sidebar';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useMarketStore } from '@/store/useMarketStore';
 import { useSidebar } from '@/contexts/SidebarContext';
 import StrategySimulator from '@/components/trading/StrategySimulator';
 import TokenSelector from '@/components/trading/TokenSelector';
@@ -46,6 +47,7 @@ const BullBearDebate = lazy(() => import('@/components/trading/BullBearDebate'))
 const PredictionHub = lazy(() => import('@/components/trading/PredictionHub'));
 const DecisionNexus = lazy(() => import('@/components/trading/DecisionNexus'));
 const MicrostructureHUD = lazy(() => import('@/components/trading/MicrostructureHUD'));
+const AlphaStream = lazy(() => import('@/components/trading/AlphaStream'));
 
 // Loading skeleton for lazy components
 const ComponentLoader = memo(({ height = 'h-full' }: { height?: string }) => (
@@ -137,6 +139,7 @@ interface Token {
     volume24h: number;
     openInterest: number;
     funding: number;
+    maxLeverage: number;
 }
 
 export default function TradingTerminal() {
@@ -153,7 +156,16 @@ function TradingTerminalContent() {
     const { settings } = useTerminalSettings();
 
     // WS Hook
-    const { isConnected: isWsConnected, lastMessage } = useWebSocket(`${API_URL}/ws`.replace('http', 'ws'));
+    const { isConnected: isWsConnected, lastMessage, sendMessage } = useWebSocket(
+        `ws://127.0.0.1:8000/ws`,
+        // High-perf direct pump to store
+        useCallback((data: any) => {
+            if (data.type === 'agg_update') {
+                console.log('📡 Aggregator Packet Received:', Object.keys(data.data));
+                useMarketStore.getState().updateFromAggregator(data.data);
+            }
+        }, [])
+    );
 
     // Session Hook
     const { agent, isAgentActive, enableSession, isLoading: isSessionLoading, error } = useHyperliquidSession();
@@ -195,6 +207,8 @@ function TradingTerminalContent() {
     const [isHubMaximized, setIsHubMaximized] = useState(false);
     const [showMicrostructure, setShowMicrostructure] = useState(false);
     const [isHudMinimized, setIsHudMinimized] = useState(false);
+    const [showAlphaStream, setShowAlphaStream] = useState(true);
+    const [isFocusMode, setIsFocusMode] = useState(false);
 
     const activeTabs = useMemo(() => {
         const allTabs = [
@@ -516,11 +530,25 @@ function TradingTerminalContent() {
     };
 
     const handleAnalyzePosition = (position: any) => {
-        const rawPos = position.position;
-        if (rawPos && rawPos.coin) {
-            setSelectedToken(rawPos.coin);
-            setAiPositionContext(rawPos);
+        // Data is passed directly from PositionsTable/DashboardPanel mapping
+        if (position && position.coin) {
+            setSelectedToken(position.coin);
+            setAiPositionContext(position);
             setActiveTab('analysis');
+        }
+    };
+
+    const handleAdjustPosition = (position: any) => {
+        if (position && position.coin) {
+            setSelectedToken(position.coin);
+            // Additional logical adjust: switch to positions/orders if not there
+            // But usually this is called FROM the positions tab.
+            // We can also trigger a notification or highlight the OrderForm.
+            setNotification({
+                title: 'Adjusting Position',
+                message: `Focusing Tactical Controls for ${position.coin}`,
+                type: 'neutral'
+            });
         }
     };
 
@@ -591,6 +619,75 @@ function TradingTerminalContent() {
         return () => clearInterval(interval);
     }, [selectedToken, tokens]);
 
+    // Whale Alert Sound Engine
+    useEffect(() => {
+        if (lastMessage && lastMessage.type === 'trades') {
+            const trades = lastMessage.data || [];
+            // Alert on trades > $500k as whales, $2M+ as mega whales
+            const megaWhale = trades.find((t: any) => parseFloat(t.sz) * parseFloat(t.px) > 1000000);
+
+            if (megaWhale) {
+                try {
+                    // Professional institutional sonar ping
+                    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.4);
+
+                    gain.gain.setValueAtTime(0.05, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.4);
+                } catch (e) {
+                    // Audio context might be blocked by browser policy until user interacts
+                }
+            }
+        }
+    }, [lastMessage]);
+
+    // Dynamic Symbol Subscription
+    useEffect(() => {
+        if (isWsConnected) {
+            sendMessage({ type: 'subscribe', coin: selectedToken });
+        }
+    }, [selectedToken, isWsConnected, sendMessage]);
+
+    // Poll for Surge Signals
+    useEffect(() => {
+        const checkSignals = async () => {
+            try {
+                const res = await axios.get(`${API_URL}/intel/latest`);
+                const signals = res.data || [];
+                // Look for recent popup signals (last 10 seconds)
+                const now = Date.now();
+                const popup = signals.find((s: any) =>
+                    s.metadata?.type === 'popup' &&
+                    (now - new Date(s.timestamp).getTime()) < 15000
+                );
+
+                if (popup) {
+                    setNotification(prev => {
+                        if (prev?.message === popup.content) return prev;
+                        return {
+                            title: popup.title,
+                            message: popup.content,
+                            type: popup.sentiment === 'bullish' ? 'bullish' : 'bearish'
+                        };
+                    });
+                }
+            } catch { }
+        };
+        const interval = setInterval(checkSignals, 5000); // Check every 5s
+        return () => clearInterval(interval);
+    }, []);
+
     // Memoized formatting functions to prevent recreation on every render
     const formatPrice = useCallback((price: number) => {
         if (!price) return '$0.00';
@@ -624,394 +721,312 @@ function TradingTerminalContent() {
 
     return (
         <div className="h-screen bg-[#050505] text-white flex overflow-hidden">
-            <Sidebar
-                currentView="terminal"
-                onViewChange={() => { }}
-                onImport={() => setShowImport(true)}
-                onAdd={() => setShowAdd(true)}
-                isMobileOpen={mobileMenuOpen}
-                onMobileClose={() => setMobileMenuOpen(false)}
-            />
+            {!isFocusMode && (
+                <Sidebar
+                    currentView="terminal"
+                    onViewChange={() => { }}
+                    onImport={() => setShowImport(true)}
+                    onAdd={() => setShowAdd(true)}
+                    isMobileOpen={mobileMenuOpen}
+                    onMobileClose={() => setMobileMenuOpen(false)}
+                />
+            )}
 
-            <main className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'} ml-0 h-full relative w-full`}>
-                {/* Notification Popup */}
-                {notification && (
-                    <div className={`absolute top-6 right-6 z-50 p-4 rounded-xl border backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 max-w-sm
-                        ${notification.type === 'bullish' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100' :
-                            notification.type === 'bearish' ? 'bg-red-500/10 border-red-500/30 text-red-100' :
-                                'bg-gray-800/90 border-gray-700 text-gray-200'}`}>
-                        <div className="flex items-start gap-3">
-                            <div className={`mt-1 p-1.5 rounded-full ${notification.type === 'bullish' ? 'bg-emerald-500/20' : notification.type === 'bearish' ? 'bg-red-500/20' : 'bg-gray-700'}`}>
-                                {notification.type === 'bullish' ? <TrendingUp className="w-4 h-4 text-emerald-400" /> :
-                                    notification.type === 'bearish' ? <TrendingDown className="w-4 h-4 text-red-400" /> :
-                                        <Zap className="w-4 h-4 text-gray-400" />}
+            <main className={`flex-1 flex transition-all duration-300 ${isFocusMode ? 'ml-0' : (isCollapsed ? 'lg:ml-20' : 'lg:ml-64')} ml-0 h-full relative w-full overflow-hidden`}>
+
+                {/* Main Content Area (Chart + Console) */}
+                <div className="flex-1 flex flex-col h-full min-w-0 bg-[#050505]">
+                    {/* Top Header Bar */}
+                    <div className="h-10 bg-black/80 border-b border-white/5 flex items-center px-4 gap-4 flex-shrink-0 z-20">
+                        {/* Token Selector & Price */}
+                        <div className="flex items-center gap-3">
+                            <TokenSelector
+                                selectedToken={selectedToken}
+                                tokens={tokens}
+                                onSelect={(token) => {
+                                    setSelectedToken(token);
+                                    setAiPositionContext(null);
+                                }}
+                            />
+
+                            <div className="flex items-center gap-2 pl-3 border-l border-white/10">
+                                <span className={`text-sm font-mono font-black ${priceChangePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {formatPrice(currentPrice)}
+                                </span>
+                                <span className={`text-[10px] font-mono font-bold ${priceChangePercent >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                    {priceChangePercent >= 0 ? '▲' : '▼'} {Math.abs(priceChangePercent).toFixed(2)}%
+                                </span>
                             </div>
-                            <div className="flex-1">
-                                <h4 className="font-bold text-sm mb-1">{notification.title}</h4>
-                                <p className="text-xs opacity-90 leading-relaxed">{notification.message}</p>
+                        </div>
+
+                        {/* Market Stats */}
+                        <div className="hidden md:flex items-center gap-6 ml-4">
+                            <div className="flex flex-col leading-tight">
+                                <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">24h Vol</span>
+                                <span className="text-[10px] font-mono font-bold text-gray-300">
+                                    {formatCompact(selectedTokenData?.volume24h || 0)}
+                                </span>
                             </div>
-                            <button onClick={() => setNotification(null)} className="text-gray-400 hover:text-white transition-colors">
-                                <Minus className="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Top Header Bar - Minimalist like Hyperdash */}
-                <div className="h-10 bg-black/80 border-b border-white/5 flex items-center px-4 gap-4 flex-shrink-0">
-                    <div className="flex items-center gap-3">
-                        <TokenSelector
-                            selectedToken={selectedToken}
-                            tokens={tokens}
-                            onSelect={(token) => {
-                                setSelectedToken(token);
-                                setAiPositionContext(null);
-                            }}
-                        />
-
-                        <div className="flex items-center gap-2 pl-3 border-l border-white/10">
-                            <span className={`text-sm font-mono font-black ${priceChangePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {formatPrice(currentPrice)}
-                            </span>
-                            <span className={`text-[10px] font-mono font-bold ${priceChangePercent >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                                {priceChangePercent >= 0 ? '▲' : '▼'} {Math.abs(priceChangePercent).toFixed(2)}%
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="hidden md:flex items-center gap-6 ml-4">
-                        <div className="flex flex-col leading-tight">
-                            <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">24h Vol</span>
-                            <span className="text-[10px] font-mono font-bold text-gray-300">
-                                {formatCompact(selectedTokenData?.volume24h || 0)}
-                            </span>
-                        </div>
-                        <div className="flex flex-col leading-tight">
-                            <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">OI</span>
-                            <span className="text-[10px] font-mono font-bold text-gray-300">
-                                {formatCompact(selectedTokenData?.openInterest || 0)}
-                            </span>
-                        </div>
-                        <div className="flex flex-col leading-tight">
-                            <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">Funding</span>
-                            <span className={`text-[10px] font-mono font-bold ${(selectedTokenData?.funding || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {((selectedTokenData?.funding || 0) * 100).toFixed(4)}%
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="hidden lg:block ml-4">
-                        <TwapCompact
-                            symbol={selectedToken}
-                            onExpand={() => setActiveTab('twap')}
-                        />
-                    </div>
-
-                    <div className="ml-auto flex items-center gap-3">
-
-                        <div className="hidden sm:block">
-                            <TimeframeSelector selected={selectedInterval} onSelect={setSelectedInterval} />
+                            <div className="flex flex-col leading-tight">
+                                <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">OI</span>
+                                <span className="text-[10px] font-mono font-bold text-gray-300">
+                                    {formatCompact(selectedTokenData?.openInterest || 0)}
+                                </span>
+                            </div>
+                            <div className="flex flex-col leading-tight">
+                                <span className="text-[8px] text-gray-500 font-black uppercase tracking-widest">Funding</span>
+                                <span className={`text-[10px] font-mono font-bold ${(selectedTokenData?.funding || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {((selectedTokenData?.funding || 0) * 100).toFixed(4)}%
+                                </span>
+                            </div>
                         </div>
 
-                        <button
-                            onClick={() => setShowMicrostructure(!showMicrostructure)}
-                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${showMicrostructure ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:border-white/20'}`}
-                        >
-                            <Sparkles className="w-3 h-3" />
-                            <span className="hidden sm:inline">AI Nexus</span>
-                        </button>
+                        {/* Center Spacer */}
+                        <div className="flex-1" />
 
-                        <div className="relative" ref={indicatorMenuRef}>
+                        {/* Right Tools */}
+                        <div className="flex items-center gap-3">
+                            <div className="hidden sm:block">
+                                <TwapCompact
+                                    symbol={selectedToken}
+                                    onExpand={() => setActiveTab('twap')}
+                                />
+                            </div>
+                            <div className="hidden sm:block">
+                                <TimeframeSelector selected={selectedInterval} onSelect={setSelectedInterval} />
+                            </div>
+
                             <button
-                                onClick={() => setShowIndicatorMenu(!showIndicatorMenu)}
-                                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${showIndicatorMenu ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:border-white/20'}`}
+                                onClick={() => setShowMicrostructure(!showMicrostructure)}
+                                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${showMicrostructure ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:border-white/20'}`}
                             >
-                                <BarChart3 className="w-3 h-3" />
-                                <span className="hidden sm:inline">Indicators</span>
+                                <Sparkles className="w-3 h-3" />
+                                <span className="hidden sm:inline">AI Nexus</span>
                             </button>
 
-                            {showIndicatorMenu && (
-                                <div className="absolute top-full right-0 mt-1 w-48 bg-[#0b0b0b] border border-gray-800 rounded-xl shadow-2xl py-1.5 flex flex-col z-[100] overflow-hidden">
-                                    {['Volume', 'EMA 50', 'EMA 200', 'Supertrend', 'Elliott Wave A-B-C', 'RSI', 'Bollinger Bands', 'VWAP', 'Parabolic SAR'].map(ind => (
+                            <button
+                                onClick={() => setShowAlphaStream(!showAlphaStream)}
+                                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${showAlphaStream ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:border-white/20'}`}
+                            >
+                                <Activity className="w-3 h-3" />
+                                <span className="hidden sm:inline">Stream</span>
+                            </button>
 
+                            {/* Indicators Menu ... */}
+                            <div className="relative" ref={indicatorMenuRef}>
+                                <button
+                                    onClick={() => setShowIndicatorMenu(!showIndicatorMenu)}
+                                    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${showIndicatorMenu ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:border-white/20'}`}
+                                >
+                                    <BarChart3 className="w-3 h-3" />
+                                    <span className="hidden sm:inline">Indicators</span>
+                                </button>
+                                {/* ... Indicator Dropdown ... */}
+                                {showIndicatorMenu && (
+                                    <div className="absolute top-full right-0 mt-1 w-48 bg-[#0b0b0b] border border-gray-800 rounded-xl shadow-2xl py-1.5 flex flex-col z-[100] overflow-hidden">
+                                        {['Volume', 'EMA 50', 'EMA 200', 'Supertrend', 'Elliott Wave A-B-C', 'RSI', 'Bollinger Bands', 'VWAP', 'Parabolic SAR'].map(ind => (
+                                            <button
+                                                key={ind}
+                                                onClick={() => toggleIndicator(ind)}
+                                                className={`px-3 py-2 text-left text-xs font-mono hover:bg-white/5 flex items-center justify-between transition-colors ${activeIndicators.has(ind) ? 'text-blue-400 bg-blue-500/5' : 'text-gray-500'}`}
+                                            >
+                                                <span>{ind}</span>
+                                                {activeIndicators.has(ind) && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_6px_#3b82f6]" />}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
 
-                                        <button
-                                            key={ind}
-                                            onClick={() => toggleIndicator(ind)}
-                                            className={`px-3 py-2 text-left text-xs font-mono hover:bg-white/5 flex items-center justify-between transition-colors ${activeIndicators.has(ind) ? 'text-blue-400 bg-blue-500/5' : 'text-gray-500'}`}
-                                        >
-                                            <span>{ind}</span>
-                                            {activeIndicators.has(ind) && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_6px_#3b82f6]" />}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
+                            <button
+                                onClick={() => setIsFocusMode(!isFocusMode)}
+                                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${isFocusMode ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:border-white/20'}`}
+                                title="Toggle Focus Mode (Zen Mode)"
+                            >
+                                <Maximize2 className="w-3 h-3" />
+                                <span className="hidden lg:inline">{isFocusMode ? 'Focused' : 'Focus'}</span>
+                            </button>
+
+                            <ConnectButton showBalance={false} accountStatus="avatar" />
                         </div>
-
-                        <button
-                            onClick={() => setShowCommandPalette(true)}
-                            className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/20 transition-all"
-                        >
-                            <Command className="w-3 h-3 text-gray-400" />
-                            <span className="text-[10px] font-bold text-gray-500">K</span>
-                        </button>
-
-                        <ConnectButton showBalance={false} accountStatus="avatar" />
                     </div>
-                </div>
 
-                <div className="p-1.5 flex-1 flex flex-col h-full overflow-hidden gap-1.5 w-full">
-                    {/* Desktop: Resizable Layout */}
-                    <div className="hidden lg:flex flex-col flex-1 min-h-0 relative overflow-hidden w-full">
-                        <Suspense fallback={<ComponentLoader />}>
-                            {(() => {
-                                // 1. Handle Top-Tier (Full Workspace) Pro Features
-                                if (activeTab === 'nexus') {
-                                    return (
-                                        <div className="h-full bg-black/40 overflow-hidden">
-                                            <DecisionNexus
-                                                onBack={() => setActiveTab('positions')}
-                                                onSelectToken={(t) => {
-                                                    setSelectedToken(t);
-                                                    setActiveTab('positions');
-                                                    setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
-                                                }}
-                                                onTabChange={(tab, t) => {
-                                                    setSelectedToken(t);
-                                                    setActiveTab(tab as any);
-                                                }}
-                                            />
-                                        </div>
-                                    );
-                                }
-                                if (activeTab === 'predictions') {
-                                    return (
-                                        <div className="h-full bg-black/40 overflow-hidden">
-                                            <PredictionHub onBack={() => setActiveTab('positions')} />
-                                        </div>
-                                    );
-                                }
-                                if (activeTab === 'pro') {
-                                    const hasProAccess = user?.role === 'pro' || user?.is_admin ||
-                                        (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
+                    {/* Notification Popup (Overlay) */}
+                    {notification && (
+                        <div className={`absolute top-14 right-6 z-50 p-4 rounded-xl border backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 max-w-sm
+                        ${notification.type === 'bullish' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100' :
+                                notification.type === 'bearish' ? 'bg-red-500/10 border-red-500/30 text-red-100' :
+                                    'bg-gray-800/90 border-gray-700 text-gray-200'}`}>
+                            <div className="flex items-start gap-3">
+                                <div className={`mt-1 p-1.5 rounded-full ${notification.type === 'bullish' ? 'bg-emerald-500/20' : notification.type === 'bearish' ? 'bg-red-500/20' : 'bg-gray-700'}`}>
+                                    {notification.type === 'bullish' ? <TrendingUp className="w-4 h-4 text-emerald-400" /> :
+                                        notification.type === 'bearish' ? <TrendingDown className="w-4 h-4 text-red-400" /> :
+                                            <Zap className="w-4 h-4 text-gray-400" />}
+                                </div>
+                                <div className="flex-1">
+                                    <h4 className="font-bold text-sm mb-1">{notification.title}</h4>
+                                    <p className="text-xs opacity-90 leading-relaxed">{notification.message}</p>
+                                </div>
+                                <button onClick={() => setNotification(null)} className="text-gray-400 hover:text-white transition-colors">
+                                    <Minus className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
-                                    return (
-                                        <div className="h-full bg-black/40 overflow-hidden">
-                                            {hasProAccess ? (
-                                                <div className="flex flex-col h-full">
-                                                    <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-black/40">
-                                                        <div className="flex items-center gap-4">
-                                                            <button
-                                                                onClick={() => setActiveTab('positions')}
-                                                                className="p-2 hover:bg-white/5 rounded-lg text-gray-500 hover:text-white transition-colors border border-white/5"
-                                                            >
-                                                                <ChevronLeft className="w-4 h-4" />
-                                                            </button>
-                                                            <div className="flex items-center gap-3">
-                                                                <div className="p-2 bg-blue-500/10 rounded-lg border border-blue-500/30">
-                                                                    <Zap className="w-4 h-4 text-blue-400" />
-                                                                </div>
-                                                                <div>
-                                                                    <h2 className="text-sm font-black uppercase tracking-widest text-white">Institutional Alpha</h2>
-                                                                    <p className="text-[10px] text-gray-500 font-medium">Specialized Arbitrage & Risk Analysis Suite</p>
+                    <div className="p-1.5 flex-1 flex flex-col h-full overflow-hidden gap-1.5 w-full">
+                        {/* Desktop: Resizable Layout */}
+                        <div className="hidden lg:flex flex-col flex-1 min-h-0 relative overflow-hidden w-full">
+                            <Suspense fallback={<ComponentLoader />}>
+                                {(() => {
+                                    // 1. Handle Top-Tier (Full Workspace) Pro Features
+                                    if (activeTab === 'nexus') {
+                                        return (
+                                            <div className="h-full bg-black/40 overflow-hidden">
+                                                <DecisionNexus
+                                                    onBack={() => setActiveTab('positions')}
+                                                    onSelectToken={(t) => {
+                                                        setSelectedToken(t);
+                                                        setActiveTab('positions');
+                                                        setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
+                                                    }}
+                                                    onTabChange={(tab, t) => {
+                                                        setSelectedToken(t);
+                                                        setActiveTab(tab as any);
+                                                    }}
+                                                />
+                                            </div>
+                                        );
+                                    }
+                                    if (activeTab === 'predictions') {
+                                        return (
+                                            <div className="h-full bg-black/40 overflow-hidden">
+                                                <PredictionHub onBack={() => setActiveTab('positions')} />
+                                            </div>
+                                        );
+                                    }
+                                    if (activeTab === 'pro') {
+                                        const hasProAccess = user?.role === 'pro' || user?.is_admin ||
+                                            (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
+
+                                        return (
+                                            <div className="h-full bg-black/40 overflow-hidden">
+                                                {hasProAccess ? (
+                                                    <div className="flex flex-col h-full">
+                                                        <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-black/40">
+                                                            <div className="flex items-center gap-4">
+                                                                <button
+                                                                    onClick={() => setActiveTab('positions')}
+                                                                    className="p-2 hover:bg-white/5 rounded-lg text-gray-500 hover:text-white transition-colors border border-white/5"
+                                                                >
+                                                                    <ChevronLeft className="w-4 h-4" />
+                                                                </button>
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="p-2 bg-blue-500/10 rounded-lg border border-blue-500/30">
+                                                                        <Zap className="w-4 h-4 text-blue-400" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <h2 className="text-sm font-black uppercase tracking-widest text-white">Institutional Alpha</h2>
+                                                                        <p className="text-[10px] text-gray-500 font-medium">Specialized Arbitrage & Risk Analysis Suite</p>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                    <div className="grid grid-cols-2 grid-rows-2 flex-1 p-2 gap-2 overflow-hidden bg-black/40">
-                                                        <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
-                                                            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/50" />
-                                                            <CompactArbScanner />
-                                                        </div>
-                                                        <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
-                                                            <div className="absolute top-0 left-0 w-1 h-full bg-amber-500/50" />
-                                                            <InstitutionalDescription symbol={selectedToken} />
-                                                        </div>
-                                                        <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
-                                                            <div className="absolute top-0 left-0 w-1 h-full bg-red-500/50" />
-                                                            <CompactRiskSimulator />
-                                                        </div>
-                                                        <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
-                                                            <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500/50" />
-                                                            <BullBearDebate symbol={selectedToken} />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <UpgradeToPro feature="Professional Arb Suite" />
-                                            )}
-                                        </div>
-                                    );
-                                }
-                                if (activeTab === 'lab') {
-                                    const hasProAccess = user?.role === 'pro' || user?.is_admin ||
-                                        (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
-
-                                    return (
-                                        <div className="h-full bg-black/40 overflow-hidden">
-                                            {hasProAccess ? (
-                                                <div className="grid grid-cols-[280px_1fr] h-full overflow-hidden">
-                                                    <div className="border-r border-white/5 bg-black/20 p-4 overflow-y-auto space-y-4">
-                                                        <div className="flex items-center gap-3 mb-6">
-                                                            <button onClick={() => setActiveTab('positions')} className="p-1.5 hover:bg-white/5 rounded-lg text-gray-500 hover:text-white transition-colors border border-white/5">
-                                                                <ChevronLeft className="w-3.5 h-3.5" />
-                                                            </button>
-                                                            <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500">Strategy Lab</h3>
-                                                        </div>
-                                                        <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/30 relative overflow-hidden group hover:border-blue-500/60 transition cursor-pointer">
-                                                            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-                                                            <div className="text-[11px] font-black uppercase text-white">Funding Rate Arb</div>
-                                                            <p className="text-[9px] text-gray-400 mt-1 leading-tight italic">Captures yield from positive funding rates.</p>
+                                                        <div className="grid grid-cols-2 grid-rows-2 flex-1 p-2 gap-2 overflow-hidden bg-black/40">
+                                                            <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
+                                                                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/50" />
+                                                                <CompactArbScanner />
+                                                            </div>
+                                                            <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
+                                                                <div className="absolute top-0 left-0 w-1 h-full bg-amber-500/50" />
+                                                                <InstitutionalDescription symbol={selectedToken} />
+                                                            </div>
+                                                            <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
+                                                                <div className="absolute top-0 left-0 w-1 h-full bg-red-500/50" />
+                                                                <CompactRiskSimulator />
+                                                            </div>
+                                                            <div className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden shadow-2xl relative group">
+                                                                <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500/50" />
+                                                                <BullBearDebate symbol={selectedToken} />
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                    <div className="h-full overflow-hidden">
-                                                        <StrategySimulator symbol={selectedToken} currentPrice={currentPrice} fundingRate={selectedTokenData?.funding || 0} onCopyTrade={async (side, price, type) => { /* trade logic preserved in actual implementation */ }} />
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <UpgradeToPro feature="Strategy Lab & Backtesting" />
-                                            )}
-                                        </div>
-                                    );
-                                }
-
-                                // 2. Handle Maximized Hub View
-                                if (isHubMaximized) {
-                                    return (
-                                        <div className="flex-1 flex overflow-hidden bg-black">
-                                            <div className="w-[52px] border-r border-white/5 bg-[#0a0a0a] flex flex-col items-center py-4 gap-4">
-                                                {activeTabs.map((tab: any) => (
-                                                    <button
-                                                        key={tab.id}
-                                                        onClick={() => {
-                                                            const hasProAccess = user?.role === 'pro' || user?.is_admin ||
-                                                                (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
-
-                                                            if (tab.isPro && !hasProAccess && tab.id !== 'nexus' && tab.id !== 'predictions') {
-                                                                if (!isAuthenticated) {
-                                                                    setNotification({ title: "Login Required", message: `Please sign in to access ${tab.label}.`, type: 'neutral' });
-                                                                } else {
-                                                                    setNotification({ title: "Pro Feature", message: `Upgrade required for ${tab.label}.`, type: 'warning' });
-                                                                }
-                                                            } else {
-                                                                setActiveTab(tab.id as any);
-                                                            }
-                                                        }}
-                                                        className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${activeTab === tab.id ? 'bg-blue-500/10 text-white' : 'text-gray-500 hover:bg-white/5'}`}
-                                                        title={tab.label}
-                                                    >
-                                                        <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? tab.color : 'text-gray-600'}`} />
-                                                    </button>
-                                                ))}
-                                                <div className="mt-auto py-4 border-t border-white/5 w-full flex justify-center">
-                                                    <button onClick={() => setIsHubMaximized(false)} className="w-10 h-10 flex items-center justify-center rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all">
-                                                        <Maximize2 className="w-5 h-5 rotate-180" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div className="flex-1 overflow-hidden relative">
-                                                {/* Reusing Hub Logic */}
-                                                {['positions', 'orders', 'analysis'].includes(activeTab as any) ? (
-                                                    <DashboardPanel isAuthenticated={isAuthenticated || !!walletAddress} positions={positions} openOrders={openOrders} tokens={tokens} onSelectToken={setSelectedToken} onClosePosition={handleClosePosition} onCancelOrder={handleCancelOrder} onAnalyze={handleAnalyzePosition} activeTabOverride={activeTab === 'analysis' ? 'positions' : activeTab as any} />
-                                                ) : activeTab === 'twap' ? (
-                                                    <TwapIntelligence symbol={selectedToken} />
-                                                ) : activeTab === 'cohorts' ? (
-                                                    <CohortSentiment symbol={selectedToken} />
-                                                ) : activeTab === 'news' ? (
-                                                    <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
-                                                ) : (activeTab as any) === 'nexus' ? (
-                                                    <DecisionNexus onSelectToken={(t) => {
-                                                        setSelectedToken(t);
-                                                        setActiveTab('positions');
-                                                        setIsHubMaximized(false);
-                                                        setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
-                                                    }}
-                                                        onTabChange={(tab, t) => {
-                                                            setSelectedToken(t);
-                                                            setActiveTab(tab as any);
-                                                            setIsHubMaximized(false);
-                                                        }} />
-                                                ) : (activeTab as any) === 'predictions' ? (
-                                                    <PredictionHub />
                                                 ) : (
-                                                    <div className="h-full flex items-center justify-center text-gray-500 font-black italic">Switching...</div>
+                                                    <UpgradeToPro feature="Professional Arb Suite" />
                                                 )}
                                             </div>
-                                        </div>
-                                    );
-                                }
+                                        );
+                                    }
+                                    if (activeTab === 'lab') {
+                                        const hasProAccess = user?.role === 'pro' || user?.is_admin ||
+                                            (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
 
-                                // 3. Default: Triple Panel Resizable Layout
-                                return (
-                                    <ResizableLayout
-                                        visiblePanels={{
-                                            chart: settings.panels.find(p => p.id === 'chart')?.enabled ?? true,
-                                            orderBook: settings.panels.find(p => p.id === 'orderBook')?.enabled ?? true,
-                                            orderForm: settings.panels.find(p => p.id === 'orderForm')?.enabled ?? true,
-                                            console: settings.panels.find(p => p.id === 'console')?.enabled ?? true,
-                                        }}
-                                        chartPanel={<ChartTabs symbol={selectedToken} interval={selectedInterval} positions={positions} openOrders={openOrders} bias={aiBias} onPriceSelect={setBookPrice} currentPrice={currentPrice} openInterest={selectedTokenData?.openInterest || 0} fundingRate={selectedTokenData?.funding || 0} activeIndicators={activeIndicators} onToggleIndicator={toggleIndicator} />}
-                                        orderBookPanel={<PremiumOrderBook coin={selectedToken} currentPrice={currentPrice} onSelectPrice={setBookPrice} onSelectSize={setBookSize} />}
-                                        orderFormPanel={<OrderForm symbol={selectedToken} currentPrice={currentPrice} isAuthenticated={isAuthenticated} token={token} walletBalance={walletBalance} agent={agent} isAgentActive={isAgentActive} onEnableAgent={enableSession} onLogin={() => login('google')} onDeposit={() => setShowDeposit(true)} selectedPrice={bookPrice} selectedSize={bookSize} error={error || undefined} />}
-                                        consolePanel={
-                                            <div className="flex h-full group/hub bg-[#050505]/40">
-                                                <div className="w-[48px] border-r border-white/5 bg-[#0a0a0a] flex flex-col z-10 transition-all hover:w-[120px] overflow-hidden">
-                                                    <div className="flex-1 overflow-y-auto scrollbar-hide py-3 flex flex-col gap-1">
-                                                        {activeTabs.map((tab: any) => (
-                                                            <button
-                                                                key={tab.id}
-                                                                onClick={() => {
-                                                                    const hasProAccess = user?.role === 'pro' || user?.is_admin ||
-                                                                        (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
-
-                                                                    if (tab.isPro && !hasProAccess && tab.id !== 'nexus' && tab.id !== 'predictions') {
-                                                                        if (!isAuthenticated) {
-                                                                            setNotification({ title: "Login Required", message: `Sign in to access ${tab.label}.`, type: 'neutral' });
-                                                                        } else {
-                                                                            setNotification({ title: "Pro Feature", message: `Upgrade required for ${tab.label}.`, type: 'warning' });
-                                                                        }
-                                                                    } else {
-                                                                        setActiveTab(tab.id as any);
-                                                                    }
-                                                                }}
-                                                                className={`w-full flex items-center px-4 py-2 gap-3 transition-all relative group ${activeTab === tab.id ? 'text-white' : 'text-gray-500 hover:text-gray-200'}`}
-                                                            >
-                                                                {activeTab === tab.id && <div className="absolute left-0 w-0.5 h-6 bg-blue-500 rounded-r-full" />}
-                                                                <div className="relative">
-                                                                    <tab.icon className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${activeTab === tab.id ? tab.color : 'text-gray-600'}`} />
-                                                                    {(() => {
-                                                                        const hasProAccess = user?.role === 'pro' || user?.is_admin ||
-                                                                            (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
-
-                                                                        if (tab.isPro && !hasProAccess && tab.id !== 'nexus' && tab.id !== 'predictions') {
-                                                                            return <Lock className="absolute -top-1 -right-1 w-2 h-2 text-gray-500" />;
-                                                                        }
-                                                                        return null;
-                                                                    })()}
-                                                                </div>
-                                                                <span className={`text-[9px] font-black uppercase tracking-widest whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${activeTab === tab.id ? 'text-white' : 'text-gray-500'}`}>
-                                                                    {tab.label}
-                                                                </span>
-                                                            </button>
-                                                        ))}
+                                        return (
+                                            <div className="h-full bg-black/40 overflow-hidden">
+                                                {hasProAccess ? (
+                                                    <div className="grid grid-cols-[280px_1fr] h-full overflow-hidden">
+                                                        <div className="border-r border-white/5 bg-black/20 p-4 overflow-y-auto space-y-4">
+                                                            <div className="flex items-center gap-3 mb-6">
+                                                                <button onClick={() => setActiveTab('positions')} className="p-1.5 hover:bg-white/5 rounded-lg text-gray-500 hover:text-white transition-colors border border-white/5">
+                                                                    <ChevronLeft className="w-3.5 h-3.5" />
+                                                                </button>
+                                                                <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500">Strategy Lab</h3>
+                                                            </div>
+                                                            <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/30 relative overflow-hidden group hover:border-blue-500/60 transition cursor-pointer">
+                                                                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                                                                <div className="text-[11px] font-black uppercase text-white">Funding Rate Arb</div>
+                                                                <p className="text-[9px] text-gray-400 mt-1 leading-tight italic">Captures yield from positive funding rates.</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="h-full overflow-hidden">
+                                                            <StrategySimulator symbol={selectedToken} currentPrice={currentPrice} fundingRate={selectedTokenData?.funding || 0} onCopyTrade={async (side, price, type) => { /* trade logic preserved in actual implementation */ }} />
+                                                        </div>
                                                     </div>
-                                                    <div className="mt-auto py-4 border-t border-white/5 w-full flex flex-col items-center gap-3 bg-[#0a0a0a]">
-                                                        <button onClick={() => setIsHubMaximized(true)} className="p-2 text-gray-500 hover:text-white transition-colors"><Maximize2 className="w-3.5 h-3.5" /></button>
-                                                        <button onClick={() => setShowSettings(true)} className="p-2 text-gray-500 hover:text-white transition-colors"><Settings className="w-3.5 h-3.5" /></button>
+                                                ) : (
+                                                    <UpgradeToPro feature="Strategy Lab & Backtesting" />
+                                                )}
+                                            </div>
+                                        );
+                                    }
+
+                                    // 2. Handle Maximized Hub View
+                                    if (isHubMaximized) {
+                                        return (
+                                            <div className="flex-1 flex overflow-hidden bg-black">
+                                                <div className="w-[52px] border-r border-white/5 bg-[#0a0a0a] flex flex-col items-center py-4 gap-4">
+                                                    {activeTabs.map((tab: any) => (
+                                                        <button
+                                                            key={tab.id}
+                                                            onClick={() => {
+                                                                const hasProAccess = user?.role === 'pro' || user?.is_admin ||
+                                                                    (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
+
+                                                                if (tab.isPro && !hasProAccess && tab.id !== 'nexus' && tab.id !== 'predictions') {
+                                                                    if (!isAuthenticated) {
+                                                                        setNotification({ title: "Login Required", message: `Please sign in to access ${tab.label}.`, type: 'neutral' });
+                                                                    } else {
+                                                                        setNotification({ title: "Pro Feature", message: `Upgrade required for ${tab.label}.`, type: 'warning' });
+                                                                    }
+                                                                } else {
+                                                                    setActiveTab(tab.id as any);
+                                                                }
+                                                            }}
+                                                            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${activeTab === tab.id ? 'bg-blue-500/10 text-white' : 'text-gray-500 hover:bg-white/5'}`}
+                                                            title={tab.label}
+                                                        >
+                                                            <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? tab.color : 'text-gray-600'}`} />
+                                                        </button>
+                                                    ))}
+                                                    <div className="mt-auto py-4 border-t border-white/5 w-full flex justify-center">
+                                                        <button onClick={() => setIsHubMaximized(false)} className="w-10 h-10 flex items-center justify-center rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all">
+                                                            <Maximize2 className="w-5 h-5 rotate-180" />
+                                                        </button>
                                                     </div>
                                                 </div>
                                                 <div className="flex-1 overflow-hidden relative">
-                                                    {['positions', 'orders'].includes(activeTab as any) ? (
-                                                        <DashboardPanel isAuthenticated={isAuthenticated || !!walletAddress} positions={positions} openOrders={openOrders} tokens={tokens} onSelectToken={setSelectedToken} onClosePosition={handleClosePosition} onCancelOrder={handleCancelOrder} onAnalyze={handleAnalyzePosition} activeTabOverride={activeTab as any} />
-                                                    ) : activeTab === 'analysis' ? (
-                                                        <div className="h-full p-4 overflow-y-auto custom-scrollbar">
-                                                            <AIAnalysis
-                                                                symbol={selectedToken}
-                                                                interval={selectedInterval}
-                                                                positionContext={positions.find((p: any) => (p.coin || p.position?.coin) === selectedToken)}
-                                                                onClosePosition={handleClosePosition}
-                                                            />
-                                                        </div>
+                                                    {/* Reusing Hub Logic */}
+                                                    {['positions', 'orders', 'analysis'].includes(activeTab as any) ? (
+                                                        <DashboardPanel isAuthenticated={isAuthenticated || !!walletAddress} positions={positions} openOrders={openOrders} tokens={tokens} onSelectToken={setSelectedToken} onClosePosition={handleClosePosition} onCancelOrder={handleCancelOrder} onAnalyze={handleAnalyzePosition} onAdjustPosition={handleAdjustPosition} activeTabOverride={activeTab === 'analysis' ? 'positions' : activeTab as any} />
                                                     ) : activeTab === 'twap' ? (
                                                         <TwapIntelligence symbol={selectedToken} />
                                                     ) : activeTab === 'cohorts' ? (
@@ -1019,12 +1034,14 @@ function TradingTerminalContent() {
                                                     ) : activeTab === 'news' ? (
                                                         <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
                                                     ) : (activeTab as any) === 'nexus' ? (
-                                                        <DecisionNexus onSelectToken={(t) => {
-                                                            setSelectedToken(t);
-                                                            setActiveTab('positions');
-                                                            setIsHubMaximized(false);
-                                                            setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
-                                                        }}
+                                                        <DecisionNexus
+                                                            selectedToken={selectedToken}
+                                                            onSelectToken={(t) => {
+                                                                setSelectedToken(t);
+                                                                setActiveTab('positions');
+                                                                setIsHubMaximized(false);
+                                                                setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
+                                                            }}
                                                             onTabChange={(tab, t) => {
                                                                 setSelectedToken(t);
                                                                 setActiveTab(tab as any);
@@ -1032,104 +1049,217 @@ function TradingTerminalContent() {
                                                             }} />
                                                     ) : (activeTab as any) === 'predictions' ? (
                                                         <PredictionHub />
-                                                    ) : activeTab === 'liquidations' ? (
-                                                        <LiquidationFirehose />
                                                     ) : (
                                                         <div className="h-full flex items-center justify-center text-gray-500 font-black italic">Switching...</div>
                                                     )}
                                                 </div>
                                             </div>
-                                        }
-                                    />
-                                );
-                            })()}
-                        </Suspense>
-                    </div>
+                                        );
+                                    }
 
-                    {/* Mobile Layout */}
-                    <div className="lg:hidden flex flex-col flex-1 min-h-0 relative overflow-hidden w-full">
-                        <Suspense fallback={<ComponentLoader />}>
-                            <div className="flex flex-col gap-1.5 min-h-0 pb-1.5 shrink-0 h-[60%] w-full">
-                                <div className={`min-w-0 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden h-full flex flex-col relative ${mobileTab === 'chart' ? 'flex' : 'hidden'}`}>
-                                    <ChartTabs
-                                        symbol={selectedToken}
-                                        interval={selectedInterval}
-                                        positions={positions}
-                                        openOrders={openOrders}
-                                        bias={aiBias}
-                                        onPriceSelect={(px: string) => setBookPrice(px)}
-                                        currentPrice={currentPrice}
-                                        openInterest={selectedTokenData?.openInterest || 0}
-                                        fundingRate={selectedTokenData?.funding || 0}
-                                        activeIndicators={activeIndicators}
-                                        onToggleIndicator={toggleIndicator}
-                                        onNavigate={(tab) => {
-                                            if (tab === 'predictions') setActiveTab('intel' as any);
-                                            // The user said "our news and prediction page".
-                                            // If 'predictions' tab exists, use it. If not, maybe 'intel'.
-                                            // I will use type assertion to bypass strict check for now as I can't see the full type.
-                                            else setActiveTab(tab as any);
-                                        }}
-                                    />
-                                </div>
+                                    // 3. Default: Triple Panel Resizable Layout
+                                    return (
+                                        <ResizableLayout
+                                            visiblePanels={{
+                                                chart: settings.panels.find(p => p.id === 'chart')?.enabled ?? true,
+                                                orderBook: settings.panels.find(p => p.id === 'orderBook')?.enabled ?? true,
+                                                orderForm: settings.panels.find(p => p.id === 'orderForm')?.enabled ?? true,
+                                                console: settings.panels.find(p => p.id === 'console')?.enabled ?? true,
+                                            }}
+                                            chartPanel={<ChartTabs symbol={selectedToken} interval={selectedInterval} positions={positions} openOrders={openOrders} bias={aiBias} onPriceSelect={setBookPrice} currentPrice={currentPrice} openInterest={selectedTokenData?.openInterest || 0} fundingRate={selectedTokenData?.funding || 0} activeIndicators={activeIndicators} onToggleIndicator={toggleIndicator} />}
+                                            orderBookPanel={<PremiumOrderBook coin={selectedToken} currentPrice={currentPrice} onSelectPrice={setBookPrice} onSelectSize={setBookSize} />}
+                                            orderFormPanel={<OrderForm symbol={selectedToken} currentPrice={currentPrice} isAuthenticated={isAuthenticated} token={token} walletBalance={walletBalance} agent={agent} isAgentActive={isAgentActive} onEnableAgent={enableSession} onLogin={() => login('google')} onDeposit={() => setShowDeposit(true)} selectedPrice={bookPrice} selectedSize={bookSize} error={error || undefined} maxLeverage={selectedTokenData?.maxLeverage || 50} />}
+                                            consolePanel={
+                                                <div className="flex h-full group/hub bg-[#050505]/40">
+                                                    <div className="w-[48px] border-r border-white/5 bg-[#0a0a0a] flex flex-col z-10 transition-all hover:w-[120px] overflow-hidden">
+                                                        <div className="flex-1 overflow-y-auto scrollbar-hide py-3 flex flex-col gap-1">
+                                                            {activeTabs.map((tab: any) => (
+                                                                <button
+                                                                    key={tab.id}
+                                                                    onClick={() => {
+                                                                        const hasProAccess = user?.role === 'pro' || user?.is_admin ||
+                                                                            (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
 
-                                <div className={`shrink-0 flex flex-row gap-1.5 min-h-0 ${mobileTab === 'order' || mobileTab === 'book' ? 'flex' : 'hidden'}`}>
-                                    <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden relative">
-                                        <PremiumOrderBook coin={selectedToken} currentPrice={currentPrice} onSelectPrice={(px) => setBookPrice(px)} onSelectSize={(sz) => setBookSize(sz)} />
-                                    </div>
-                                    <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto flex flex-col">
-                                        <OrderForm
+                                                                        if (tab.isPro && !hasProAccess && tab.id !== 'nexus' && tab.id !== 'predictions') {
+                                                                            if (!isAuthenticated) {
+                                                                                setNotification({ title: "Login Required", message: `Sign in to access ${tab.label}.`, type: 'neutral' });
+                                                                            } else {
+                                                                                setNotification({ title: "Pro Feature", message: `Upgrade required for ${tab.label}.`, type: 'warning' });
+                                                                            }
+                                                                        } else {
+                                                                            setActiveTab(tab.id as any);
+                                                                        }
+                                                                    }}
+                                                                    className={`w-full flex items-center px-4 py-2 gap-3 transition-all relative group ${activeTab === tab.id ? 'text-white' : 'text-gray-500 hover:text-gray-200'}`}
+                                                                >
+                                                                    {activeTab === tab.id && <div className="absolute left-0 w-0.5 h-6 bg-blue-500 rounded-r-full" />}
+                                                                    <div className="relative">
+                                                                        <tab.icon className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${activeTab === tab.id ? tab.color : 'text-gray-600'}`} />
+                                                                        {(() => {
+                                                                            const hasProAccess = user?.role === 'pro' || user?.is_admin ||
+                                                                                (user?.email && ["sunny@hypersentry.ai", "jainsunny34@gmail.com", "sunnyjain.jiet@gmail.com", "admin@hypersentry.ai"].includes(user.email.toLowerCase()));
+
+                                                                            if (tab.isPro && !hasProAccess && tab.id !== 'nexus' && tab.id !== 'predictions') {
+                                                                                return <Lock className="absolute -top-1 -right-1 w-2 h-2 text-gray-500" />;
+                                                                            }
+                                                                            return null;
+                                                                        })()}
+                                                                    </div>
+                                                                    <span className={`text-[9px] font-black uppercase tracking-widest whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${activeTab === tab.id ? 'text-white' : 'text-gray-500'}`}>
+                                                                        {tab.label}
+                                                                    </span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        <div className="mt-auto py-4 border-t border-white/5 w-full flex flex-col items-center gap-3 bg-[#0a0a0a]">
+                                                            <button onClick={() => setIsHubMaximized(true)} className="p-2 text-gray-500 hover:text-white transition-colors"><Maximize2 className="w-3.5 h-3.5" /></button>
+                                                            <button onClick={() => setShowSettings(true)} className="p-2 text-gray-500 hover:text-white transition-colors"><Settings className="w-3.5 h-3.5" /></button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex-1 overflow-hidden relative">
+                                                        {['positions', 'orders'].includes(activeTab as any) ? (
+                                                            <DashboardPanel isAuthenticated={isAuthenticated || !!walletAddress} positions={positions} openOrders={openOrders} tokens={tokens} onSelectToken={setSelectedToken} onClosePosition={handleClosePosition} onCancelOrder={handleCancelOrder} onAnalyze={handleAnalyzePosition} onAdjustPosition={handleAdjustPosition} activeTabOverride={activeTab as any} />
+                                                        ) : activeTab === 'analysis' ? (
+                                                            <div className="h-full p-4 overflow-y-auto custom-scrollbar">
+                                                                <AIAnalysis
+                                                                    symbol={selectedToken}
+                                                                    interval={selectedInterval}
+                                                                    positionContext={positions.find((p: any) => (p.coin || p.position?.coin) === selectedToken)}
+                                                                    onClosePosition={handleClosePosition}
+                                                                />
+                                                            </div>
+                                                        ) : activeTab === 'twap' ? (
+                                                            <TwapIntelligence symbol={selectedToken} />
+                                                        ) : activeTab === 'cohorts' ? (
+                                                            <CohortSentiment symbol={selectedToken} />
+                                                        ) : activeTab === 'news' ? (
+                                                            <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
+                                                        ) : (activeTab as any) === 'nexus' ? (
+                                                            <DecisionNexus onSelectToken={(t) => {
+                                                                setSelectedToken(t);
+                                                                setActiveTab('positions');
+                                                                setIsHubMaximized(false);
+                                                                setNotification({ title: 'Strategy Activated', message: `Trading ${t} via Decision Nexus`, type: 'bullish' });
+                                                            }}
+                                                                onTabChange={(tab, t) => {
+                                                                    setSelectedToken(t);
+                                                                    setActiveTab(tab as any);
+                                                                    setIsHubMaximized(false);
+                                                                }} />
+                                                        ) : (activeTab as any) === 'predictions' ? (
+                                                            <PredictionHub />
+                                                        ) : activeTab === 'liquidations' ? (
+                                                            <LiquidationFirehose />
+                                                        ) : (
+                                                            <div className="h-full flex items-center justify-center text-gray-500 font-black italic">Switching...</div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            }
+                                        />
+                                    );
+                                })()}
+                            </Suspense>
+                        </div>
+
+                        {/* Mobile Layout */}
+                        <div className="lg:hidden flex flex-col flex-1 min-h-0 relative overflow-hidden w-full">
+                            <Suspense fallback={<ComponentLoader />}>
+                                <div className="flex flex-col gap-1.5 min-h-0 pb-1.5 shrink-0 h-[60%] w-full">
+                                    <div className={`min-w-0 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden h-full flex flex-col relative ${mobileTab === 'chart' ? 'flex' : 'hidden'}`}>
+                                        <ChartTabs
                                             symbol={selectedToken}
+                                            interval={selectedInterval}
+                                            positions={positions}
+                                            openOrders={openOrders}
+                                            bias={aiBias}
+                                            onPriceSelect={(px: string) => setBookPrice(px)}
                                             currentPrice={currentPrice}
-                                            isAuthenticated={isAuthenticated}
-                                            token={token}
-                                            walletBalance={walletBalance}
-                                            agent={agent}
-                                            isAgentActive={isAgentActive}
-                                            onEnableAgent={enableSession}
-                                            onLogin={() => login('google')}
-                                            onDeposit={() => setShowDeposit(true)}
-                                            selectedPrice={bookPrice}
-                                            selectedSize={bookSize}
-                                            error={error || undefined}
+                                            openInterest={selectedTokenData?.openInterest || 0}
+                                            fundingRate={selectedTokenData?.funding || 0}
+                                            activeIndicators={activeIndicators}
+                                            onToggleIndicator={toggleIndicator}
+                                            onNavigate={(tab) => {
+                                                if (tab === 'predictions') setActiveTab('intel' as any);
+                                                // The user said "our news and prediction page".
+                                                // If 'predictions' tab exists, use it. If not, maybe 'intel'.
+                                                // I will use type assertion to bypass strict check for now as I can't see the full type.
+                                                else setActiveTab(tab as any);
+                                            }}
                                         />
                                     </div>
-                                </div>
-                            </div>
 
-                            <div className="flex bg-gray-950 border-t border-white/10 p-1 shrink-0 h-12">
-                                <button onClick={() => setMobileTab('chart')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'chart' ? 'text-blue-500 bg-blue-500/10' : 'text-gray-500'}`}>
-                                    <BarChart3 className="w-4 h-4" />
-                                    <span className="text-[8px] font-black uppercase">Chart</span>
-                                </button>
-                                <button onClick={() => setMobileTab('book')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'book' ? 'text-purple-500 bg-purple-500/10' : 'text-gray-500'}`}>
-                                    <RefreshCw className="w-4 h-4" />
-                                    <span className="text-[8px] font-black uppercase">Book</span>
-                                </button>
-                                <button onClick={() => setMobileTab('order')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'order' ? 'text-emerald-500 bg-emerald-500/10' : 'text-gray-500'}`}>
-                                    <Zap className="w-4 h-4" />
-                                    <span className="text-[8px] font-black uppercase">Trade</span>
-                                </button>
-                                <button onClick={() => setMobileTab('intel')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'intel' ? 'text-amber-500 bg-amber-500/10' : 'text-gray-500'}`}>
-                                    <Sparkles className="w-4 h-4" />
-                                    <span className="text-[8px] font-black uppercase">Intel</span>
-                                </button>
-                            </div>
-
-                            <div className={`flex flex-col flex-1 min-h-0 w-full bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden ${mobileTab === 'intel' ? 'flex' : 'hidden'}`}>
-                                <div className="flex-1 overflow-hidden">
-                                    <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
+                                    <div className={`shrink-0 flex flex-row gap-1.5 min-h-0 ${mobileTab === 'order' || mobileTab === 'book' ? 'flex' : 'hidden'}`}>
+                                        <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden relative">
+                                            <PremiumOrderBook coin={selectedToken} currentPrice={currentPrice} onSelectPrice={(px) => setBookPrice(px)} onSelectSize={(sz) => setBookSize(sz)} />
+                                        </div>
+                                        <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto flex flex-col">
+                                            <OrderForm
+                                                symbol={selectedToken}
+                                                currentPrice={currentPrice}
+                                                isAuthenticated={isAuthenticated}
+                                                token={token}
+                                                walletBalance={walletBalance}
+                                                agent={agent}
+                                                isAgentActive={isAgentActive}
+                                                onEnableAgent={enableSession}
+                                                onLogin={() => login('google')}
+                                                onDeposit={() => setShowDeposit(true)}
+                                                selectedPrice={bookPrice}
+                                                selectedSize={bookSize}
+                                                error={error || undefined}
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        </Suspense>
+
+                                <div className="flex bg-gray-950 border-t border-white/10 p-1 shrink-0 h-12">
+                                    <button onClick={() => setMobileTab('chart')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'chart' ? 'text-blue-500 bg-blue-500/10' : 'text-gray-500'}`}>
+                                        <BarChart3 className="w-4 h-4" />
+                                        <span className="text-[8px] font-black uppercase">Chart</span>
+                                    </button>
+                                    <button onClick={() => setMobileTab('book')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'book' ? 'text-purple-500 bg-purple-500/10' : 'text-gray-500'}`}>
+                                        <RefreshCw className="w-4 h-4" />
+                                        <span className="text-[8px] font-black uppercase">Book</span>
+                                    </button>
+                                    <button onClick={() => setMobileTab('order')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'order' ? 'text-emerald-500 bg-emerald-500/10' : 'text-gray-500'}`}>
+                                        <Zap className="w-4 h-4" />
+                                        <span className="text-[8px] font-black uppercase">Trade</span>
+                                    </button>
+                                    <button onClick={() => setMobileTab('intel')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${mobileTab === 'intel' ? 'text-amber-500 bg-amber-500/10' : 'text-gray-500'}`}>
+                                        <Sparkles className="w-4 h-4" />
+                                        <span className="text-[8px] font-black uppercase">Intel</span>
+                                    </button>
+                                </div>
+
+                                <div className={`flex flex-col flex-1 min-h-0 w-full bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden ${mobileTab === 'intel' ? 'flex' : 'hidden'}`}>
+                                    <div className="flex-1 overflow-hidden">
+                                        <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
+                                    </div>
+                                </div>
+                            </Suspense>
+                        </div>
                     </div>
+
+                    <Suspense fallback={null}>
+                        <InsiderIntelligence coin={selectedToken} />
+                    </Suspense>
+
+
+                    <StatusBar isWsConnected={isWsConnected} tokens={tokens} isAgentActive={isAgentActive} onOpenCommandPalette={() => setShowCommandPalette(true)} />
                 </div>
 
-                <Suspense fallback={null}>
-                    <InsiderIntelligence coin={selectedToken} />
-                </Suspense>
-
-                <StatusBar isWsConnected={isWsConnected} tokens={tokens} isAgentActive={isAgentActive} onOpenCommandPalette={() => setShowCommandPalette(true)} />
+                {/* Right Sidebar: Alpha Stream */}
+                {(showAlphaStream && !isFocusMode) && (
+                    <aside className="w-80 border-l border-white/5 bg-[#050505] hidden xl:flex flex-col z-30 transition-all duration-300">
+                        <Suspense fallback={<ComponentLoader />}>
+                            <AlphaStream onSelectToken={(token) => {
+                                setSelectedToken(token);
+                                // Optional: Highlight graph
+                            }} />
+                        </Suspense>
+                    </aside>
+                )}
             </main>
 
             {/* Modals */}
@@ -1145,6 +1275,8 @@ function TradingTerminalContent() {
                             setActiveTab('pro');
                         } else if (cmd === 'twap') {
                             setActiveTab('twap');
+                        } else if (cmd === 'zen') {
+                            setIsFocusMode(prev => !prev);
                         }
                     }}
                     isOpen={showCommandPalette}

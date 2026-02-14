@@ -6,25 +6,25 @@ import { useEffect, useRef, useState, useCallback } from 'react';
  * Manages institutional-grade WebSocket connections with automatic normalization
  * and robust reconnection logic.
  */
-export const useWebSocket = (url: string) => {
+export const useWebSocket = (url: string, onMessage?: (data: any) => void) => {
     const [isConnected, setIsConnected] = useState(false);
     const [lastMessage, setLastMessage] = useState<any>(null);
     const ws = useRef<WebSocket | null>(null);
     const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
+    const onMessageRef = useRef(onMessage);
+
+    useEffect(() => {
+        onMessageRef.current = onMessage;
+    }, [onMessage]);
 
     const connect = useCallback(() => {
         // Normalize URL
         let targetUrl = url;
         if (typeof window !== 'undefined') {
-            // Avoid mixed localhost/127.0.0.1 which can cause State 3 failures in some browsers
-            if (targetUrl.includes('localhost') && window.location.hostname !== 'localhost') {
-                targetUrl = targetUrl.replace('localhost', window.location.hostname);
-            } else if (targetUrl.includes('127.0.0.1') && window.location.hostname === 'localhost') {
-                targetUrl = targetUrl.replace('127.0.0.1', 'localhost');
-            }
+            const host = window.location.hostname;
+            if (targetUrl.includes('localhost')) targetUrl = targetUrl.replace('localhost', host);
+            if (targetUrl.includes('127.0.0.1')) targetUrl = targetUrl.replace('127.0.0.1', host);
         }
-
-        console.log('🔌 WebSocket: Initializing connection to', targetUrl);
 
         if (ws.current) {
             try {
@@ -42,38 +42,32 @@ export const useWebSocket = (url: string) => {
             ws.current = socket;
 
             socket.onopen = () => {
-                console.log('✅ WebSocket: Connection established to', targetUrl);
                 setIsConnected(true);
                 if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
             };
 
             socket.onclose = (event) => {
-                console.warn(`❌ WebSocket: Connection closed (Code: ${event.code}, Reason: ${event.reason || 'none'})`);
                 setIsConnected(false);
                 ws.current = null;
-
-                // Exponential backoff or static retry
                 if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
                 reconnectTimer.current = setTimeout(connect, 5000);
             };
 
             socket.onerror = () => {
-                // Use warn instead of error to prevent Next.js dev overlay
-                console.warn(`⚠️ WebSocket: Connection issue (State ${socket.readyState}) - will retry`);
-                // Non-verbose error, handled by onclose
+                // handled by onclose
             };
 
             socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
+                    if (onMessageRef.current) onMessageRef.current(data);
                     setLastMessage(data);
                 } catch (e) {
+                    if (onMessageRef.current) onMessageRef.current(event.data);
                     setLastMessage(event.data);
                 }
             };
         } catch {
-            // Silently handle - will retry connection
-            console.warn('⚠️ WebSocket: Setup failed, will retry in 5s');
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
             reconnectTimer.current = setTimeout(connect, 5000);
         }

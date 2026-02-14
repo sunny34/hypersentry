@@ -292,14 +292,29 @@ export default function StopClusters({ symbol, currentPrice, onPriceSelect }: St
     const formatPrice = (p: number) => p >= 1000 ? p.toLocaleString(undefined, { maximumFractionDigits: 0 }) : p.toFixed(2);
 
     if (loading) {
-        return (
-            <div className="w-full h-full flex items-center justify-center bg-black/60">
-                <div className="flex flex-col items-center gap-3">
-                    <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-                    <span className="text-xs text-gray-500 font-medium">Analyzing stop clusters...</span>
+        <div className="w-full h-full flex flex-col bg-[#0a0a0a] animate-pulse">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+                <div className="h-4 w-32 bg-white/10 rounded" />
+                <div className="h-4 w-20 bg-white/10 rounded" />
+            </div>
+            <div className="flex-1 flex">
+                <div className="flex-1 relative bg-white/5" />
+                <div className="w-64 border-l border-white/5 p-3 space-y-4">
+                    <div className="space-y-2">
+                        <div className="h-3 w-24 bg-white/10 rounded mb-2" />
+                        {[1, 2, 3, 4].map(i => (
+                            <div key={i} className="h-10 w-full bg-white/5 rounded-lg" />
+                        ))}
+                    </div>
+                    <div className="space-y-2">
+                        <div className="h-3 w-24 bg-white/10 rounded mb-2" />
+                        {[1, 2, 3, 4].map(i => (
+                            <div key={i} className="h-10 w-full bg-white/5 rounded-lg" />
+                        ))}
+                    </div>
                 </div>
             </div>
-        );
+        </div>
     }
 
     return (

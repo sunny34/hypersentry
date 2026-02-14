@@ -25,9 +25,14 @@ import { ThemeProvider } from '../contexts/ThemeContext';
 import { TerminalSettingsProvider } from '../contexts/TerminalSettingsContext';
 import '@rainbow-me/rainbowkit/styles.css';
 
+const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID;
+if (!walletConnectProjectId) {
+    console.warn('⚠️ NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID not set in .env.local — wallet connections will fail. Get one at https://cloud.walletconnect.com');
+}
+
 const config = getDefaultConfig({
     appName: 'HyperliquidSentry',
-    projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID || '3a8170812b534d0ff9d794f35a9cc25e',
+    projectId: walletConnectProjectId || 'placeholder',
     wallets: [
         {
             groupName: 'Recommended',

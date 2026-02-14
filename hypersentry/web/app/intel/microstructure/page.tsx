@@ -237,7 +237,7 @@ export default function MicrostructureDashboard() {
                                     />
                                     <Tooltip
                                         contentStyle={{ backgroundColor: '#111', border: '1px solid rgba(255,255,255,0.1)' }}
-                                        formatter={(val: number) => [`$${((val * (current.prices?.binance || 60000)) / 1000000000).toFixed(2)}B`, 'Open Interest']}
+                                        formatter={(val: any) => [`$${((Number(val) * (current.prices?.binance || 60000)) / 1000000000).toFixed(2)}B`, 'Open Interest']}
                                     />
                                     <Area type="monotone" dataKey="oi" stroke="#f59e0b" strokeWidth={2} fill="url(#colorOi)" />
                                 </AreaChart>

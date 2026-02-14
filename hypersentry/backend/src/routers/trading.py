@@ -322,24 +322,87 @@ async def get_active_trades(
 
 @router.post("/candles")
 async def get_candles(req: CandlesRequest):
-    """Get candle snapshot via backend proxy."""
-    try:
-        logger.info(f"🕯️ [CANDLES] Fetching {req.token} {req.interval} | {req.start_time} -> {req.end_time}")
+    """
+    Get candle snapshot via direct API call with Binance Fallback.
+    """
+    import aiohttp
+    
+    # Normalize token (BTC-USD -> BTC)
+    token = req.token.split('-')[0].split('/')[0].upper()
+    print(f"DEBUG: CANDLES Fetching {token} (raw: {req.token}) {req.interval}")
+    
+    async def fetch_hl(session):
+        try:
+            async with session.post(
+                "https://api.hyperliquid.xyz/info",
+                json={
+                    "type": "candleSnapshot", 
+                    "req": {
+                        "coin": token, 
+                        "interval": req.interval, 
+                        "startTime": int(req.start_time), 
+                        "endTime": int(req.end_time)
+                    }
+                },
+                timeout=3
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                elif resp.status == 429:
+                    print("⚠️ HL Rate Limit (429) on Candles")
+        except: pass
+        return []
+
+    async def fetch_binance(session):
+        # Map interval (HL format to Binance format)
+        # HL: 1m, 5m, 15m, 1h, 4h, 1d...
+        # Binance: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
         
-        # Fetch candles using the SDK wrapper
-        candles = manager.hl_client.get_candles(
-            coin=req.token,
-            interval=req.interval,
-            start_time=req.start_time,
-            end_time=req.end_time
-        )
+        b_interval = req.interval
         
-        if not candles:
-            logger.warning(f"⚠️ [CANDLES] Empty response for {req.token}")
+        # Legacy frontend compatibility
+        if req.interval == "60": b_interval = "1h"
+        if req.interval == "240": b_interval = "4h" 
+        if req.interval == "D": b_interval = "1d"
+        
+        # Validate binance supports it, else default to 1h
+        valid_binance = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"]
+        if b_interval not in valid_binance:
+            b_interval = "1h"
+
+        symbol = f"{token}USDT"
+        try:
+            url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={b_interval}&startTime={int(req.start_time)}&endTime={int(req.end_time)}&limit=1000"
+            async with session.get(url, timeout=3) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Map to HL format: {t, o, h, l, c, v}
+                    return [{
+                        "t": int(k[0]),
+                        "o": k[1],
+                        "h": k[2],
+                        "l": k[3],
+                        "c": k[4],
+                        "v": k[5]
+                    } for k in data]
+        except Exception as e:
+            print(f"Binance Fallback Error: {e}")
+        return []
+
+    async with aiohttp.ClientSession() as session:
+        # 1. Try Hyperliquid
+        candles = await fetch_hl(session)
+        
+        # 2. Fallback to Binance if empty or limited (for Majors)
+        if not candles and token in ["BTC", "ETH", "SOL", "BNB", "AVAX", "DOGE", "LINK", "ARB"]:
+            print(f"🔄 Switching to Binance Fallback for {token}")
+            candles = await fetch_binance(session)
             
-        return candles
-    except Exception as e:
-        logger.error(f"❌ [CANDLES] Failed to fetch candles: {e}")
+        if candles:
+            print(f"✅ [CANDLES] Fetched {len(candles)} candles for {token}")
+            return candles
+            
+        print(f"❌ [CANDLES] Failed all sources for {token}")
         return []
 
 from pydantic import BaseModel
@@ -608,7 +671,7 @@ async def analyze_chart(req: AnalyzeRequest):
                 """
                 
                 ai_resp = client.models.generate_content(
-                    model='gemini-1.5-flash',
+                    model='gemini-flash-latest',
                     contents=prompt, 
                     config={"response_mime_type": "application/json"}
                 )
@@ -849,3 +912,69 @@ async def get_all_prices(request: Request):
     except Exception as e:
         logger.error(f"Failed to fetch prices: {e}")
         return {}
+
+
+# === Whale Wallet Tracker Endpoints ===
+
+@router.get("/whales/alerts")
+async def get_whale_alerts(request: Request, limit: int = 50, coin: str = None):
+    """Get recent whale position change alerts."""
+    tracker = getattr(request.app.state, "whale_tracker", None)
+    if not tracker:
+        return {"alerts": [], "error": "Whale tracker not initialized"}
+    
+    alerts = tracker.get_alerts(limit=limit, coin=coin)
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "initialized": tracker._initialized,
+    }
+
+@router.get("/whales/positions")
+async def get_whale_positions(request: Request, address: str = None, coin: str = None):
+    """Get current positions held by tracked whales."""
+    tracker = getattr(request.app.state, "whale_tracker", None)
+    if not tracker:
+        return {"positions": [], "error": "Whale tracker not initialized"}
+    
+    positions = tracker.get_whale_positions(address=address)
+    
+    if coin:
+        positions = [p for p in positions if p["coin"].upper() == coin.upper()]
+    
+    return {
+        "positions": positions,
+        "count": len(positions),
+    }
+
+@router.get("/whales/summary")
+async def get_whale_summary(request: Request, coin: str = None):
+    """Get aggregated whale positioning (long vs short bias)."""
+    tracker = getattr(request.app.state, "whale_tracker", None)
+    if not tracker:
+        return {"error": "Whale tracker not initialized"}
+    
+    return tracker.get_whale_summary(coin=coin)
+
+@router.get("/whales/leaderboard")
+async def get_whale_leaderboard(request: Request):
+    """Get whale leaderboard with PnL rankings and performance data."""
+    tracker = getattr(request.app.state, "whale_tracker", None)
+    if not tracker:
+        return {"leaderboard": [], "error": "Whale tracker not initialized"}
+    
+    leaderboard = tracker.get_leaderboard()
+    return {
+        "leaderboard": leaderboard,
+        "count": len(leaderboard),
+        "initialized": tracker._initialized,
+    }
+
+@router.get("/whales/stats")
+async def get_whale_stats(request: Request):
+    """Get whale tracker operational statistics."""
+    tracker = getattr(request.app.state, "whale_tracker", None)
+    if not tracker:
+        return {"error": "Whale tracker not initialized"}
+    
+    return tracker.get_stats()

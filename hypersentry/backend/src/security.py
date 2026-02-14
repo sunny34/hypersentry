@@ -4,15 +4,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Generate a key if one doesn't exist (in production, strictly load from env)
+# Generate a key if one doesn't exist
 _env_key = os.getenv("ENCRYPTION_KEY")
 if not _env_key:
-    # detailed warning in logs would go here
+    if os.getenv("ENVIRONMENT") == "production":
+        raise RuntimeError("FATAL: ENCRYPTION_KEY must be set in production. Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'")
+    import logging
+    logging.getLogger(__name__).warning("⚠️ ENCRYPTION_KEY not set. Using temporary key — all encrypted data will be LOST on restart.")
     _key = Fernet.generate_key()
-    # In a real app, you MUST persist this key or you lose all data
-    # For this session/MVP, we'll error if it's missing to force safety
-    # But to prevent crashing the user's current run if they didn't set it:
-    print("WARNING: ENCRYPTION_KEY not found in env. Using temporary key (data lost on restart).")
 else:
     _key = _env_key.encode() if isinstance(_env_key, str) else _env_key
 

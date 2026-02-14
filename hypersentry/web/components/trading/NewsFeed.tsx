@@ -147,7 +147,6 @@ export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMa
                     if (isConfirmedByGuardian) {
                         // Logic to prevent duplicate trades for same news URL
                         if (lastNewsUrlRef.current !== newItem.url) {
-                            console.log(`🤖 [AUTO-PILOT] Confirmed by Guardian. Executing ${sentiment.toUpperCase()} on ${newItem.title}`);
                             window.dispatchEvent(new CustomEvent('smart-trade-execute', {
                                 detail: {
                                     symbol: symbol,

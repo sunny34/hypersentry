@@ -73,7 +73,8 @@ export default function LiquidationHeatmap({
         if (!currentPrice || !openInterest) return [];
 
         const levels: LiqLevel[] = [];
-        const totalOIUsd = openInterest * currentPrice;
+        // openInterest is already in USD (notional) from the API/Parent. Default to 0 if missing.
+        const totalOIUsd = openInterest || 0;
 
         // More granular leverage tiers
         const leverageTiers = [
@@ -125,6 +126,7 @@ export default function LiquidationHeatmap({
     }, [currentPrice, openInterest, fundingRate]);
 
     const formatK = (n: number) => {
+        if (n >= 1000000000000) return `$${(n / 1000000000000).toFixed(1)}T`;
         if (n >= 1000000000) return `$${(n / 1000000000).toFixed(1)}B`;
         if (n >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
         if (n >= 1000) return `$${(n / 1000).toFixed(0)}K`;

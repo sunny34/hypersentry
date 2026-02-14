@@ -30,6 +30,8 @@ class TelegramProvider(IntelProvider):
                         updates = data.get("result", [])
                         
                         items = []
+                        import re
+                        
                         for upd in updates:
                             self.last_update_id = max(self.last_update_id, upd["update_id"])
                             
@@ -38,21 +40,46 @@ class TelegramProvider(IntelProvider):
                                 continue
                                 
                             text = message["text"]
-                            # Basic parser: first line is title, rest is content
-                            lines = text.split("\n", 1)
-                            title = lines[0][:100]
-                            content = lines[1] if len(lines) > 1 else text
                             
-                            items.append(self.normalize(
+                            # 1. Extract Tickers
+                            # Matches $BTC, #ETH, or just capitalized symbols in context if possible
+                            tickers = re.findall(r'[\$#]([A-Za-z]{2,6})', text)
+                            
+                            # 2. Check High Impact Keywords
+                            high_impact_terms = ["LISTING", "BINANCE", "UPBIT", "COINBASE", "HACK", "EXPLOIT", "STOLEN", "PARTNERSHIP", "MAINNET"]
+                            is_high_impact = any(term in text.upper() for term in high_impact_terms)
+                            
+                            # 3. Format Title
+                            # If tickers found, start with them
+                            if tickers:
+                                ticker_str = " ".join([f"${t.upper()}" for t in tickers[:3]])
+                                title = f"TG Alpha {ticker_str}: {text[:80]}..."
+                            else:
+                                lines = text.split("\n", 1)
+                                title = f"TG Alpha: {lines[0][:100]}"
+                            
+                            content = text
+                            
+                            chat_id = str(message['chat']['id']).replace("-100", "") # Clean channel ID
+                            
+                            item = self.normalize(
                                 raw_id=str(upd["update_id"]),
-                                title=f"TG Alpha: {title}",
+                                title=title,
                                 content=content,
-                                url=f"https://t.me/c/{message['chat']['id']}/{message.get('message_id', '')}",
+                                url=f"https://t.me/c/{chat_id}/{message.get('message_id', '')}",
                                 timestamp=datetime.datetime.fromtimestamp(message["date"]),
-                                sentiment="neutral" # Frontend heuristics will handle this
-                            ))
+                                sentiment="neutral" # Engine will enhance this via Gemini
+                            )
+                            
+                            if is_high_impact:
+                                item["is_high_impact"] = True
+                                item["sentiment"] = "bullish" if "LISTING" in text.upper() else "bearish" if "HACK" in text.upper() else "neutral"
+                            
+                            items.append(item)
+                            
                         return items
         except Exception as e:
-            print(f"Telegram Provider Error: {e}")
+            # Silent fail to avoid log spam if no internet/updates
+            pass
             
         return []

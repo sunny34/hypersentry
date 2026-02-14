@@ -20,8 +20,11 @@ class SentimentAnalyzer:
             try:
                 # Initialize the new Google GenAI client
                 self.client = genai.Client(api_key=self.api_key)
-                self.model_id = 'gemini-1.5-flash'
-                logger.info("✅ Gemini 1.5 Flash initialized via google-genai SDK.")
+                self.model_id = 'gemini-flash-latest' 
+                logger.info("✅ Gemini Flash Latest initialized via google-genai SDK.")
+            except ImportError:
+                logger.warning("google-genai not installed. Sentiment analysis disabled.")
+                self.client = None
             except Exception as e:
                 logger.error(f"Failed to initialize Gemini Client: {e}")
                 self.client = None

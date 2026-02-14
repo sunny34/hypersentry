@@ -1,21 +1,8 @@
 'use client';
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { useHyperliquidWS } from '../../hooks/useHyperliquidWS';
+import { useMarketStore, OrderBookLevel, Trade, LiquidityWall } from '@/store/useMarketStore';
 import { Activity, Zap, Shield, Target, ChevronDown, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-
-interface OrderBookLevel {
-    px: string;
-    sz: string;
-    n: number;
-}
-
-interface Trade {
-    px: string;
-    sz: string;
-    side: 'B' | 'A';
-    time: number;
-    coin: string;
-}
+import { VirtualOrderBook } from './VirtualOrderBook';
 
 interface PremiumOrderBookProps {
     coin: string;
@@ -24,113 +11,43 @@ interface PremiumOrderBookProps {
     currentPrice?: number;
 }
 
-interface LiquidityWall {
-    price: number;
-    size: number;
-    side: 'bid' | 'ask';
-    strength: 'massive' | 'major' | 'significant';
-}
-
 export default function PremiumOrderBook({
     coin,
     onSelectPrice,
     onSelectSize,
     currentPrice = 0
 }: PremiumOrderBookProps) {
-    const { status, subscribe, addListener } = useHyperliquidWS();
-    const [bids, setBids] = useState<OrderBookLevel[]>([]);
-    const [asks, setAsks] = useState<OrderBookLevel[]>([]);
-    const [trades, setTrades] = useState<Trade[]>([]);
+    // Consume high-fidelity data from Unified Market Store
+    const marketData = useMarketStore((state: any) => state.marketData[coin]);
+
+    const bids = useMemo(() => marketData?.book[0] || [], [marketData?.book]);
+    const asks = useMemo(() => marketData?.book[1] || [], [marketData?.book]);
+    const trades = useMemo(() => marketData?.trades || [], [marketData?.trades]);
+    const walls = useMemo(() => marketData?.walls || [], [marketData?.walls]);
+    const cvd = marketData?.cvd || 0;
+
     const [view, setView] = useState<'depth' | 'trades' | 'flow'>('depth');
-    const [precision, setPrecision] = useState(2);
+    const [precision, setPrecision] = useState(4);
     const [showSettings, setShowSettings] = useState(false);
-    const [cvd, setCvd] = useState(0); // Cumulative Volume Delta
-    const [recentDelta, setRecentDelta] = useState(0);
-    const [walls, setWalls] = useState<LiquidityWall[]>([]);
     const [cvdTimeframe, setCvdTimeframe] = useState<'1h' | '4h' | '24h' | 'session'>('session');
-    const cvdStartTime = useRef(Date.now());
 
     const asksRef = useRef<HTMLDivElement>(null);
     const [isSticky, setIsSticky] = useState(true);
-    const lastCvdUpdate = useRef(Date.now());
+    const lastUpdate = useRef(Date.now());
+    const [recentDelta, setRecentDelta] = useState(0);
 
-    // Subscribe to WebSocket channels
+    // Track delta for visual pulses
     useEffect(() => {
-        if (status === 'connected') {
-            subscribe({ type: 'l2Book', coin });
-            subscribe({ type: 'trades', coin });
+        if (cvd !== 0) {
+            setRecentDelta(cvd); // Simple delta for pulse
+            const t = setTimeout(() => setRecentDelta(0), 1000);
+            return () => clearTimeout(t);
         }
-    }, [status, coin, subscribe]);
+    }, [cvd]);
 
-    // Handle L2 book updates
+    // Auto-scroll asks
     useEffect(() => {
-        const removeL2 = addListener('l2Book', (data: any) => {
-            if (data.coin === coin && data.levels?.length === 2) {
-                const newBids = data.levels[0].slice(0, 25);
-                const newAsks = data.levels[1].slice(0, 25);
-                setBids(newBids);
-                setAsks(newAsks);
-
-                // Detect liquidity walls
-                detectWalls(newBids, newAsks);
-            }
-        });
-
-        const removeTrades = addListener('trades', (data: any) => {
-            if (!Array.isArray(data)) return;
-            const coinTrades = data.filter((t: any) => t.coin === coin);
-            if (coinTrades.length > 0) {
-                setTrades(prev => [...coinTrades, ...prev].slice(0, 100));
-
-                // Update CVD
-                const delta = coinTrades.reduce((acc: number, t: Trade) => {
-                    const size = parseFloat(t.sz);
-                    return acc + (t.side === 'B' ? size : -size);
-                }, 0);
-
-                setCvd(prev => prev + delta);
-                setRecentDelta(delta);
-                lastCvdUpdate.current = Date.now();
-            }
-        });
-
-        return () => {
-            removeL2?.();
-            removeTrades?.();
-        };
-    }, [addListener, coin]);
-
-    // Detect liquidity walls
-    const detectWalls = useCallback((bids: OrderBookLevel[], asks: OrderBookLevel[]) => {
-        const allLevels = [
-            ...bids.map(b => ({ ...b, side: 'bid' as const })),
-            ...asks.map(a => ({ ...a, side: 'ask' as const }))
-        ];
-
-        const avgSize = allLevels.reduce((sum, l) => sum + parseFloat(l.sz), 0) / allLevels.length;
-
-        const detectedWalls: LiquidityWall[] = [];
-
-        allLevels.forEach(level => {
-            const size = parseFloat(level.sz);
-            const price = parseFloat(level.px);
-
-            if (size > avgSize * 10) {
-                detectedWalls.push({
-                    price,
-                    size,
-                    side: level.side,
-                    strength: size > avgSize * 20 ? 'massive' : size > avgSize * 15 ? 'major' : 'significant'
-                });
-            }
-        });
-
-        setWalls(detectedWalls.slice(0, 3));
-    }, []);
-
-    // Auto-scroll asks to bottom
-    useEffect(() => {
-        if (asksRef.current && isSticky) {
+        if (view === 'depth' && asksRef.current && isSticky) {
             asksRef.current.scrollTop = asksRef.current.scrollHeight;
         }
     }, [asks, isSticky]);
@@ -143,12 +60,12 @@ export default function PremiumOrderBook({
 
     // Calculate metrics
     const { maxSize, totalBidSize, totalAskSize, imbalance, spread, spreadPercent } = useMemo(() => {
-        const bidSizes = bids.map(b => parseFloat(b.sz));
-        const askSizes = asks.map(a => parseFloat(a.sz));
+        const bidSizes = bids.map((b: OrderBookLevel) => parseFloat(b.sz));
+        const askSizes = asks.map((a: OrderBookLevel) => parseFloat(a.sz));
         const maxBid = Math.max(...bidSizes, 0);
         const maxAsk = Math.max(...askSizes, 0);
-        const totalBid = bidSizes.reduce((a, b) => a + b, 0);
-        const totalAsk = askSizes.reduce((a, b) => a + b, 0);
+        const totalBid = bidSizes.reduce((a: number, b: number) => a + b, 0);
+        const totalAsk = askSizes.reduce((a: number, b: number) => a + b, 0);
         const total = totalBid + totalAsk;
 
         const bestBid = bids[0] ? parseFloat(bids[0].px) : 0;
@@ -223,16 +140,21 @@ export default function PremiumOrderBook({
 
                 {/* View Tabs */}
                 <div className="flex bg-white/5 rounded-lg p-0.5">
-                    {['depth', 'trades', 'flow'].map(v => (
+                    {[
+                        { id: 'depth', label: 'Depth', title: 'Order Book Depth' },
+                        { id: 'trades', label: 'Trades', title: 'Recent Trades' },
+                        { id: 'flow', label: 'Flow (Pro)', title: 'Order Flow & CVD (Pro)' }
+                    ].map(v => (
                         <button
-                            key={v}
-                            onClick={() => setView(v as any)}
-                            className={`px-2 py-1 text-[8px] font-black uppercase rounded-md transition-all ${view === v
+                            key={v.id}
+                            onClick={() => setView(v.id as any)}
+                            title={v.title}
+                            className={`px-2 py-1 text-[8px] font-black uppercase rounded-md transition-all ${view === v.id
                                 ? 'bg-white/10 text-white'
                                 : 'text-gray-500 hover:text-gray-300'
                                 }`}
                         >
-                            {v}
+                            {v.label}
                         </button>
                     ))}
                 </div>
@@ -253,8 +175,6 @@ export default function PremiumOrderBook({
                             value={cvdTimeframe}
                             onChange={(e) => {
                                 setCvdTimeframe(e.target.value as any);
-                                setCvd(0); // Reset CVD on timeframe change
-                                cvdStartTime.current = Date.now();
                             }}
                             className="text-[8px] bg-white/5 border border-white/10 rounded px-1 py-0.5 text-gray-400 cursor-pointer hover:bg-white/10"
                         >
@@ -291,17 +211,17 @@ export default function PremiumOrderBook({
                     <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
                         <Shield className="w-3 h-3 text-amber-400 flex-shrink-0" />
                         <span className="text-[8px] text-amber-400 font-black uppercase tracking-wider flex-shrink-0">WALLS</span>
-                        {walls.map((wall, i) => (
+                        {walls.map((wall: LiquidityWall, i: number) => (
                             <button
                                 key={i}
-                                onClick={() => onSelectPrice?.(wall.price.toFixed(precision))}
+                                onClick={() => onSelectPrice?.(parseFloat(wall.px).toFixed(precision))}
                                 className={`flex items-center gap-1 px-2 py-0.5 rounded text-[8px] font-mono cursor-pointer transition-all hover:scale-105 flex-shrink-0 ${wall.side === 'bid'
                                     ? 'bg-[var(--color-bullish)]/20 text-[var(--color-bullish)] border border-[var(--color-bullish)]/30'
                                     : 'bg-[var(--color-bearish)]/20 text-[var(--color-bearish)] border border-[var(--color-bearish)]/30'
                                     } ${wall.strength === 'massive' ? 'animate-pulse' : ''}`}
                             >
-                                <span>${wall.price.toLocaleString()}</span>
-                                <span className="opacity-60">{formatSize(wall.size.toString())}</span>
+                                <span>${parseFloat(wall.px).toLocaleString()}</span>
+                                <span className="opacity-60">{formatSize(wall.sz)}</span>
                             </button>
                         ))}
                     </div>
@@ -319,150 +239,14 @@ export default function PremiumOrderBook({
                             <span className="w-[25%] text-right">Total</span>
                         </div>
 
-                        {/* Asks (Sells) */}
-                        <div
-                            ref={asksRef}
-                            onScroll={handleAsksScroll}
-                            className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 hover:scrollbar-thumb-white/20 flex flex-col min-h-0"
-                        >
-                            <div className="flex-1" />
-                            {[...asks].reverse().map((ask, idx) => {
-                                const size = parseFloat(ask.sz);
-                                const price = parseFloat(ask.px);
-                                const pct = (size / maxSize) * 100;
-                                const intensity = getSizeIntensity(size);
-                                const whaleType = isWhale(size, price);
-                                const cumulative = asks.slice(0, asks.length - idx).reduce((s, a) => s + parseFloat(a.sz), 0);
-
-                                return (
-                                    <div
-                                        key={ask.px}
-                                        className={`relative flex px-3 h-[22px] shrink-0 items-center group cursor-pointer transition-all hover:bg-white/10 ${whaleType ? 'bg-[var(--color-bearish)]/5' : ''
-                                            }`}
-                                        onClick={() => onSelectPrice?.(ask.px)}
-                                    >
-                                        {/* Depth bar */}
-                                        <div
-                                            className={`absolute inset-y-0 right-0 transition-all duration-200 ${intensity === 'ultra' ? 'bg-[var(--color-bearish)]/40' :
-                                                intensity === 'high' ? 'bg-[var(--color-bearish)]/30' :
-                                                    intensity === 'medium' ? 'bg-[var(--color-bearish)]/20' : 'bg-[var(--color-bearish)]/10'
-                                                }`}
-                                            style={{ width: `${Math.max(pct, 2)}%` }}
-                                        />
-
-                                        {/* Price */}
-                                        <span className="w-[45%] text-[var(--color-bearish)] font-mono font-bold z-10 text-[10px] group-hover:text-white transition-colors">
-                                            {price.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision })}
-                                        </span>
-
-                                        {/* Size */}
-                                        <div className="w-[30%] flex items-center justify-end gap-1 z-10">
-                                            {whaleType && (
-                                                <span className={`text-[7px] font-black px-1 rounded ${whaleType === 'mega' ? 'bg-[var(--color-bearish)] text-white animate-pulse' :
-                                                    whaleType === 'whale' ? 'bg-[var(--color-bearish)]/40 text-[var(--color-bearish)]/80' :
-                                                        'bg-[var(--color-bearish)]/20 text-[var(--color-bearish)]'
-                                                    }`}>
-                                                    {whaleType === 'mega' ? '🐋' : whaleType === 'whale' ? 'WHALE' : 'SHARK'}
-                                                </span>
-                                            )}
-                                            <span
-                                                onClick={(e) => { e.stopPropagation(); onSelectSize?.(ask.sz); }}
-                                                className={`font-mono text-[10px] cursor-pointer hover:text-white ${intensity === 'ultra' || intensity === 'high' ? 'text-white font-bold' : 'text-gray-400'
-                                                    }`}
-                                            >
-                                                {formatSize(ask.sz)}
-                                            </span>
-                                        </div>
-
-                                        {/* Cumulative */}
-                                        <span className="w-[25%] text-right text-gray-600 font-mono text-[9px] z-10">
-                                            {formatSize(cumulative.toString())}
-                                        </span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        {/* Spread / Mid Price */}
-                        <div className="py-2.5 px-3 bg-gradient-to-r from-[var(--background)] via-[var(--glass-bg)] to-[var(--background)] border-y border-[var(--glass-border)] shrink-0 shadow-[0_0_30px_rgba(0,0,0,0.5)]">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <span className="text-2xl font-black font-mono text-white tracking-tight">
-                                        {midPrice.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision })}
-                                    </span>
-                                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${cvd >= 0 ? 'bg-[var(--color-bullish)]/20' : 'bg-[var(--color-bearish)]/20'
-                                        }`}>
-                                        {cvd >= 0 ? (
-                                            <ArrowUpRight className="w-3 h-3 text-[var(--color-bullish)]" />
-                                        ) : (
-                                            <ArrowDownRight className="w-3 h-3 text-[var(--color-bearish)]" />
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-4 text-[9px]">
-                                    <div className="flex flex-col items-end">
-                                        <span className="text-gray-600 text-[7px] font-bold uppercase">Spread</span>
-                                        <span className="text-[var(--color-primary)] font-mono font-bold">
-                                            {spread.toFixed(precision)} ({spreadPercent.toFixed(3)}%)
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Bids (Buys) */}
-                        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 hover:scrollbar-thumb-white/20 flex flex-col min-h-0">
-                            {bids.map((bid, idx) => {
-                                const size = parseFloat(bid.sz);
-                                const price = parseFloat(bid.px);
-                                const pct = (size / maxSize) * 100;
-                                const intensity = getSizeIntensity(size);
-                                const whaleType = isWhale(size, price);
-                                const cumulative = bids.slice(0, idx + 1).reduce((s, b) => s + parseFloat(b.sz), 0);
-
-                                return (
-                                    <div
-                                        key={bid.px}
-                                        className={`relative flex px-3 h-[22px] shrink-0 items-center group cursor-pointer transition-all hover:bg-white/10 ${whaleType ? 'bg-[var(--color-bullish)]/5' : ''
-                                            }`}
-                                        onClick={() => onSelectPrice?.(bid.px)}
-                                    >
-                                        <div
-                                            className={`absolute inset-y-0 right-0 transition-all duration-200 ${intensity === 'ultra' ? 'bg-[var(--color-bullish)]/40' :
-                                                intensity === 'high' ? 'bg-[var(--color-bullish)]/30' :
-                                                    intensity === 'medium' ? 'bg-[var(--color-bullish)]/20' : 'bg-[var(--color-bullish)]/10'
-                                                }`}
-                                            style={{ width: `${Math.max(pct, 2)}%` }}
-                                        />
-
-                                        <span className="w-[45%] text-[var(--color-bullish)] font-mono font-bold z-10 text-[10px] group-hover:text-white transition-colors">
-                                            {price.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision })}
-                                        </span>
-
-                                        <div className="w-[30%] flex items-center justify-end gap-1 z-10">
-                                            {whaleType && (
-                                                <span className={`text-[7px] font-black px-1 rounded ${whaleType === 'mega' ? 'bg-[var(--color-bullish)] text-black animate-pulse' :
-                                                    whaleType === 'whale' ? 'bg-[var(--color-bullish)]/40 text-[var(--color-bullish)]/80' :
-                                                        'bg-[var(--color-bullish)]/20 text-[var(--color-bullish)]'
-                                                    }`}>
-                                                    {whaleType === 'mega' ? '🐋' : whaleType === 'whale' ? 'WHALE' : 'SHARK'}
-                                                </span>
-                                            )}
-                                            <span
-                                                onClick={(e) => { e.stopPropagation(); onSelectSize?.(bid.sz); }}
-                                                className={`font-mono text-[10px] cursor-pointer hover:text-white ${intensity === 'ultra' || intensity === 'high' ? 'text-white font-bold' : 'text-gray-400'
-                                                    }`}
-                                            >
-                                                {formatSize(bid.sz)}
-                                            </span>
-                                        </div>
-
-                                        <span className="w-[25%] text-right text-gray-600 font-mono text-[9px] z-10">
-                                            {formatSize(cumulative.toString())}
-                                        </span>
-                                    </div>
-                                );
-                            })}
+                        <div className="flex-1 min-h-0 bg-[var(--background)] relative">
+                            <VirtualOrderBook
+                                bids={bids}
+                                asks={asks}
+                                precision={precision}
+                                midPrice={marketData?.price || currentPrice}
+                                onSelectPrice={onSelectPrice}
+                            />
                         </div>
                     </div>
                 ) : view === 'trades' ? (
@@ -474,7 +258,7 @@ export default function PremiumOrderBook({
                             <span className="text-right">Time</span>
                         </div>
                         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
-                            {trades.slice(0, 50).map((trade, i) => {
+                            {trades.slice(0, 50).map((trade: Trade, i: number) => {
                                 const size = parseFloat(trade.sz);
                                 const price = parseFloat(trade.px);
                                 const isBuy = trade.side === 'B';
@@ -569,7 +353,7 @@ export default function PremiumOrderBook({
                                 <span className="text-[9px] font-black uppercase text-gray-500">Whale Activity</span>
                             </div>
                             <div className="space-y-1.5">
-                                {trades.filter(t => isWhale(parseFloat(t.sz), parseFloat(t.px))).slice(0, 5).map((trade, i) => (
+                                {trades.filter((t: Trade) => isWhale(parseFloat(t.sz), parseFloat(t.px))).slice(0, 5).map((trade: Trade, i: number) => (
                                     <div key={i} className={`flex items-center justify-between px-2 py-1.5 rounded-lg ${trade.side === 'B' ? 'bg-[var(--color-bullish)]/10' : 'bg-[var(--color-bearish)]/10'
                                         }`}>
                                         <div className="flex items-center gap-2">
@@ -583,7 +367,7 @@ export default function PremiumOrderBook({
                                         </span>
                                     </div>
                                 ))}
-                                {trades.filter(t => isWhale(parseFloat(t.sz), parseFloat(t.px))).length === 0 && (
+                                {trades.filter((t: Trade) => isWhale(parseFloat(t.sz), parseFloat(t.px))).length === 0 && (
                                     <div className="text-center py-4 text-gray-600 text-[9px]">
                                         No whale trades detected
                                     </div>

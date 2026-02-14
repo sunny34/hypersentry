@@ -13,7 +13,7 @@ from src.notifications import TelegramBot
 logger = logging.getLogger("BridgeMonitor")
 
 class BridgeMonitor:
-    def __init__(self, notifier: TelegramBot, min_amount_usd: float = 3_000_000):
+    def __init__(self, notifier: TelegramBot, min_amount_usd: float = 100_000):
         """
         Initialize bridge monitor
         
@@ -41,7 +41,7 @@ class BridgeMonitor:
                 except Exception as e:
                     logger.error(f"Error in bridge monitor: {e}")
                 
-                await asyncio.sleep(30)  # Check every 30 seconds
+                await asyncio.sleep(60)  # Check every 60 seconds (less aggressive)
     
     async def check_bridges(self, retries: int = 3):
         """Fetch and process recent bridges from Hypurrscan"""
@@ -49,17 +49,18 @@ class BridgeMonitor:
         
         for attempt in range(retries):
             try:
-                headers = {'accept': 'application/json'}
-                async with self.session.get(url, headers=headers, timeout=10) as resp:
+                headers = {'accept': 'application/json', 'User-Agent': 'HyperSentry/1.0'}
+                async with self.session.get(url, headers=headers, timeout=20) as resp:
                     if resp.status == 429:
-                        wait_time = (attempt + 1) * 5
+                        wait_time = (attempt + 1) * 10
                         logger.warning(f"Rate limited, waiting {wait_time}s...")
                         await asyncio.sleep(wait_time)
                         continue
                     
                     if resp.status != 200:
                         logger.warning(f"Bridge API returned {resp.status}")
-                        return
+                        await asyncio.sleep(5)
+                        continue
                     
                     data = await resp.json()
                     await self.process_bridges(data)
@@ -67,11 +68,14 @@ class BridgeMonitor:
                     
             except asyncio.TimeoutError:
                 logger.warning(f"Bridge API timeout, attempt {attempt + 1}/{retries}")
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)
+            except aiohttp.ClientConnectorError as e:
+                 logger.warning(f"Bridge connection error: {e}, attempt {attempt + 1}/{retries}")
+                 await asyncio.sleep(5)
             except Exception as e:
                 logger.error(f"Bridge check error: {e}")
                 if attempt < retries - 1:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(5)
     
     async def process_bridges(self, bridges: List[Dict]):
         """Process bridge transactions and alert on large ones"""

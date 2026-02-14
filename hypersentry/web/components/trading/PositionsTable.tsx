@@ -20,9 +20,40 @@ interface PositionsTableProps {
     onSelectToken?: (symbol: string) => void;
     onClose?: (position: Position) => void;
     onAnalyze?: (position: Position) => void;
+    onAdjust?: (position: Position) => void;
 }
 
-export default function PositionsTable({ positions, isLoading, onSelectToken, onClose, onAnalyze }: PositionsTableProps) {
+const PnLCell = ({ pnl, roe }: { pnl: number, roe: number }) => {
+    const [flash, setFlash] = (require('react').useState)(null);
+    const prevPnl = (require('react').useRef)(pnl);
+
+    (require('react').useEffect)(() => {
+        if (pnl > prevPnl.current) {
+            setFlash('up');
+            setTimeout(() => setFlash(null), 500);
+        } else if (pnl < prevPnl.current) {
+            setFlash('down');
+            setTimeout(() => setFlash(null), 500);
+        }
+        prevPnl.current = pnl;
+    }, [pnl]);
+
+    const flashClass = flash === 'up' ? 'bg-emerald-500/20' : flash === 'down' ? 'bg-red-500/20' : '';
+
+    return (
+        <div className={`flex flex-col items-end group/pnl transition-all duration-300 rounded ${flashClass}`}>
+            <span className={`text-sm font-black tracking-tight flex items-center gap-1 ${pnl >= 0 ? 'text-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.3)]' : 'text-red-400'}`}>
+                {pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                ${Math.abs(pnl).toFixed(2)}
+            </span>
+            <span className={`text-[9px] font-bold ${pnl >= 0 ? 'text-emerald-600' : 'text-red-800'}`}>
+                {pnl >= 0 ? '+' : ''}{roe.toFixed(2)}%
+            </span>
+        </div>
+    );
+};
+
+export default function PositionsTable({ positions, isLoading, onSelectToken, onClose, onAnalyze, onAdjust }: PositionsTableProps) {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center h-48 text-gray-500 gap-2">
@@ -92,15 +123,7 @@ export default function PositionsTable({ positions, isLoading, onSelectToken, on
                                 </div>
                             </td>
                             <td className="px-2 py-2 text-right">
-                                <div className="flex flex-col items-end group/pnl">
-                                    <span className={`text-sm font-black tracking-tight flex items-center gap-1 ${pos.pnl >= 0 ? 'text-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.3)]' : 'text-red-400'}`}>
-                                        {pos.pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                                        ${Math.abs(pos.pnl).toFixed(2)}
-                                    </span>
-                                    <span className={`text-[9px] font-bold ${pos.pnl >= 0 ? 'text-emerald-600' : 'text-red-800'}`}>
-                                        {pos.pnl >= 0 ? '+' : ''}{pos.roe.toFixed(2)}%
-                                    </span>
-                                </div>
+                                <PnLCell pnl={pos.pnl} roe={pos.roe} />
                             </td>
                             <td className="px-2 py-2 text-right pr-4">
                                 <div className="flex items-center justify-end gap-1.5">
@@ -111,6 +134,7 @@ export default function PositionsTable({ positions, isLoading, onSelectToken, on
                                         Intel
                                     </button>
                                     <button
+                                        onClick={() => onAdjust && onAdjust(pos)}
                                         className="h-6 px-2 bg-white/5 hover:bg-white/10 text-gray-400 border border-white/10 rounded text-[9px] font-black uppercase tracking-tighter transition-all"
                                     >
                                         Adjust

@@ -21,11 +21,29 @@ const groupStyle: CSSProperties = {
     width: '100%',
 };
 
+// Custom Resize Handle
+function ResizeHandle({ className = "", id }: { className?: string; id?: string }) {
+    const isHorizontal = className.includes('h-');
+    return (
+        <Separator
+            className={`flex items-center justify-center bg-transparent group transition-colors duration-300 z-50 
+                data-[resize-handle-state="hover"]:bg-blue-500/10 data-[resize-handle-state="drag"]:bg-blue-500/20 
+                ${isHorizontal ? 'cursor-row-resize h-3 -my-1.5' : 'cursor-col-resize w-3 -mx-1.5'} 
+                ${className.replace(/w-[\d\.]+|h-[\d\.]+|m[xy]-[\d\.]+/g, '')}`} // Strip conflicting sizing/margin classes
+            id={id}
+        >
+            <div className={`rounded-full transition-all bg-white/10 group-hover:bg-blue-500 group-active:bg-blue-400 
+                ${isHorizontal ? 'w-12 h-1' : 'h-12 w-1'}`}
+            />
+        </Separator>
+    );
+}
+
 /**
  * ResizableLayout Component
  * 
  * Provides drag-to-resize functionality for the trading terminal panels.
- * Uses react-resizable-panels for smooth, performant resizing.
+ * Uses react-resizable-panels for smooth, performant resizing and stability.
  */
 export default function ResizableLayout({
     chartPanel,
@@ -35,12 +53,18 @@ export default function ResizableLayout({
     isMobile = false,
     visiblePanels = { chart: true, orderBook: true, orderForm: true, console: true }
 }: ResizableLayoutProps & { visiblePanels?: Record<string, boolean> }) {
-    // On mobile, just stack panels
+    // On mobile, just stack panels without resizing logic
     if (isMobile) {
         return (
-            <div className="flex flex-col h-full w-full gap-1.5">
-                {visiblePanels.chart && <div className="flex-1">{chartPanel}</div>}
-                {visiblePanels.console && <div className="h-40">{consolePanel}</div>}
+            <div className="flex flex-col h-full w-full gap-1.5 overflow-y-auto">
+                {visiblePanels.chart && <div className="h-[400px] shrink-0">{chartPanel}</div>}
+                {(visiblePanels.orderBook || visiblePanels.orderForm) && (
+                    <div className="flex gap-1.5 h-[350px] shrink-0">
+                        {visiblePanels.orderBook && <div className="flex-1 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">{orderBookPanel}</div>}
+                        {visiblePanels.orderForm && <div className="flex-1 bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto">{orderFormPanel}</div>}
+                    </div>
+                )}
+                {visiblePanels.console && <div className="h-40 shrink-0">{consolePanel}</div>}
             </div>
         );
     }
@@ -49,101 +73,92 @@ export default function ResizableLayout({
     const showTopSection = visiblePanels.chart || showRightSide;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', gap: '4px' }}>
-            {/* Top Section: Chart & Order Panels */}
-            {showTopSection && (
-                <div style={{ flex: visiblePanels.console ? '1 1 60%' : '1 1 100%', minHeight: 0, display: 'flex', gap: '4px' }}>
-                    {/* Left: Chart Panel */}
-                    {visiblePanels.chart && (
-                        <div style={{ flex: showRightSide ? '1 1 55%' : '1 1 100%', minWidth: 0 }} className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">
-                            {chartPanel}
+        <div className="h-full w-full">
+            <Group orientation="vertical" style={groupStyle} id="main-group">
+                {/* Top Section: Chart & Order Panels */}
+                {showTopSection && (
+                    <>
+                        <Panel id="top" defaultSize="70" minSize="30" maxSize="90" className="flex">
+                            <Group orientation="horizontal" style={groupStyle} id="top-group">
+                                {/* Left: Chart Panel */}
+                                {visiblePanels.chart && (
+                                    <>
+                                        <Panel id="chart" defaultSize="60" minSize="20" className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden relative">
+                                            {/* Container to ensure chart fits */}
+                                            <div className="absolute inset-0">
+                                                {chartPanel}
+                                            </div>
+                                        </Panel>
+                                        {showRightSide && (
+                                            <Separator
+                                                className="flex items-center justify-center bg-transparent group transition-colors duration-300 z-50 w-3 -mx-1.5 cursor-col-resize hover:bg-blue-500/10 active:bg-blue-500/20"
+                                                id="h-handle-chart"
+                                            >
+                                                <div className="rounded-full transition-all bg-white/10 group-hover:bg-blue-500 group-active:bg-blue-400 w-1 h-8" />
+                                            </Separator>
+                                        )}
+                                    </>
+                                )}
+
+                                {/* Right side: Order Book + Order Form */}
+                                {showRightSide && (
+                                    <Panel id="right" defaultSize="40" minSize="20">
+                                        <Group orientation="horizontal" style={groupStyle} id="right-group">
+                                            {visiblePanels.orderBook && (
+                                                <>
+                                                    <Panel id="orderbook" defaultSize="50" minSize="20" className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">
+                                                        {orderBookPanel}
+                                                    </Panel>
+                                                    {visiblePanels.orderForm && (
+                                                        <Separator
+                                                            className="flex items-center justify-center bg-transparent group transition-colors duration-300 z-50 w-3 -mx-1.5 cursor-col-resize hover:bg-blue-500/10 active:bg-blue-500/20"
+                                                            id="h-handle-ob"
+                                                        >
+                                                            <div className="rounded-full transition-all bg-white/10 group-hover:bg-blue-500 group-active:bg-blue-400 w-1 h-8" />
+                                                        </Separator>
+                                                    )}
+                                                </>
+                                            )}
+
+                                            {visiblePanels.orderForm && (
+                                                <Panel id="orderform" defaultSize="50" minSize="20" className="bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto">
+                                                    {orderFormPanel}
+                                                </Panel>
+                                            )}
+                                        </Group>
+                                    </Panel>
+                                )}
+                            </Group>
+                        </Panel>
+                        {visiblePanels.console && (
+                            <Separator
+                                className="flex items-center justify-center bg-transparent group transition-colors duration-300 z-50 h-3 -my-1.5 cursor-row-resize hover:bg-blue-500/10 active:bg-blue-500/20"
+                                id="v-handle-console"
+                            >
+                                <div className="rounded-full transition-all bg-white/10 group-hover:bg-blue-500 group-active:bg-blue-400 h-1 w-12" />
+                            </Separator>
+                        )}
+                    </>
+                )}
+
+                {/* Bottom: Console Panel */}
+                {visiblePanels.console && (
+                    <Panel id="console" defaultSize="30" minSize="10" className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden relative">
+                        <div className="absolute inset-0">
+                            {consolePanel}
                         </div>
-                    )}
-
-                    {/* Right side: Order Book + Order Form */}
-                    {showRightSide && (
-                        <div style={{ flex: visiblePanels.chart ? '1 1 45%' : '1 1 100%', minWidth: 0, display: 'flex', gap: '4px' }}>
-                            {/* Order Book */}
-                            {visiblePanels.orderBook && (
-                                <div style={{ flex: visiblePanels.orderForm ? '1 1 50%' : '1 1 100%', minWidth: 0 }} className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">
-                                    {orderBookPanel}
-                                </div>
-                            )}
-
-                            {/* Order Form */}
-                            {visiblePanels.orderForm && (
-                                <div style={{ flex: visiblePanels.orderBook ? '1 1 50%' : '1 1 100%', minWidth: 0 }} className="bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 hover:scrollbar-thumb-white/20">
-                                    {orderFormPanel}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Bottom: Console Panel */}
-            {visiblePanels.console && (
-                <div style={{ flex: showTopSection ? '0 0 40%' : '1 1 100%', minHeight: 0 }} className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">
-                    {consolePanel}
-                </div>
-            )}
+                    </Panel>
+                )}
+            </Group>
         </div>
     );
 }
 
 /**
  * Resizable version using react-resizable-panels
- * Can be toggled on when the basic layout is confirmed working
+ * Deprecated: merged into default export
  */
-export function ResizableLayoutWithPanels({
-    chartPanel,
-    orderBookPanel,
-    orderFormPanel,
-    consolePanel,
-}: ResizableLayoutProps) {
-    return (
-        <Group orientation="vertical" style={groupStyle}>
-            {/* Top Section */}
-            <Panel id="top" defaultSize={60} minSize={30} maxSize={80}>
-                <Group orientation="horizontal" style={groupStyle}>
-                    {/* Chart Panel */}
-                    <Panel id="chart" defaultSize={55} minSize={30} maxSize={75}>
-                        <div className="h-full w-full bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">
-                            {chartPanel}
-                        </div>
-                    </Panel>
-
-                    <Separator className="w-1 mx-0.5 bg-white/10 hover:bg-[var(--color-primary)]/50 cursor-col-resize transition-colors" />
-
-                    {/* Right side */}
-                    <Panel id="right" defaultSize={45} minSize={25}>
-                        <Group orientation="horizontal" style={groupStyle}>
-                            <Panel id="orderbook" defaultSize={50} minSize={30}>
-                                <div className="h-full w-full bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">
-                                    {orderBookPanel}
-                                </div>
-                            </Panel>
-
-                            <Separator className="w-1 mx-0.5 bg-white/10 hover:bg-[var(--color-primary)]/50 cursor-col-resize transition-colors" />
-
-                            <Panel id="orderform" defaultSize={50} minSize={25}>
-                                <div className="h-full w-full bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto">
-                                    {orderFormPanel}
-                                </div>
-                            </Panel>
-                        </Group>
-                    </Panel>
-                </Group>
-            </Panel>
-
-            <Separator className="h-1 my-0.5 bg-white/10 hover:bg-[var(--color-primary)]/50 cursor-row-resize transition-colors" />
-
-            {/* Console Panel */}
-            <Panel id="console" defaultSize={40} minSize={15} maxSize={60}>
-                <div className="h-full w-full bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">
-                    {consolePanel}
-                </div>
-            </Panel>
-        </Group>
-    );
+export function ResizableLayoutWithPanels(props: ResizableLayoutProps) {
+    return <ResizableLayout {...props} />;
 }
+

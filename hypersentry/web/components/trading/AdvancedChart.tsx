@@ -78,9 +78,7 @@ function AdvancedChart({
     const sarRef = useRef<ISeriesApi<"Line"> | null>(null);
     const wallSeriesRef = useRef<any[]>([]); // Array of PriceLines for detected walls
 
-    // New Refs for CVD and Premium
-    const cvdSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-    const premiumSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+
 
     // Trading Markers Refs
     const positionLinesRef = useRef<any[]>([]);
@@ -92,8 +90,6 @@ function AdvancedChart({
     const [chartHeight, setChartHeight] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [showCvd, setShowCvd] = useState(true); // Default to showing CVD
-    const [showPremium, setShowPremium] = useState(true); // Default to showing Premium
     const [liquidationMarkers, setLiquidationMarkers] = useState<SeriesMarker<Time>[]>([]);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [showWalls, setShowWalls] = useState(true);
@@ -104,30 +100,13 @@ function AdvancedChart({
     const [volumeProfile, setVolumeProfile] = useState<any[]>([]);
     const [hoveredDepth, setHoveredDepth] = useState<{ bids: number, asks: number } | null>(null);
     const [signals, setSignals] = useState<any[]>([]);
-    const [microHistory, setMicroHistory] = useState<any[]>([]); // For storing fetched micro history
 
     const { subscribe, addListener } = useHyperliquidWS();
     const lastCandleRef = useRef<any>(null);
     const wallAgeRef = useRef<Map<string, number>>(new Map()); // ex-side-px -> firstSeenTimestamp
     const [persistenceScore, setPersistenceScore] = useState(0);
 
-    // Fetch Microstructure History (CVD & Premium)
-    useEffect(() => {
-        const fetchMicro = async () => {
-            try {
-                const res = await axios.get(`${API_URL}/intel/microstructure`);
-                if (res.data && Array.isArray(res.data.history)) {
-                    setMicroHistory(res.data.history);
-                }
-            } catch (e) {
-                console.warn("Failed to fetch micro history for chart", e);
-            }
-        };
 
-        fetchMicro();
-        const interval = setInterval(fetchMicro, 5000);
-        return () => clearInterval(interval);
-    }, []);
 
     // ... (Liquidation fetch effect remains same)
 
@@ -243,45 +222,7 @@ function AdvancedChart({
     // ... (Render Walls effect remains same)
 
     // 6. Render CVD and Premium
-    useEffect(() => {
-        if (!cvdSeriesRef.current || !premiumSeriesRef.current || microHistory.length === 0) return;
 
-        // map history to chart data
-        // note: history timestamps need to be matched to chart timestamps. 
-        // Micro history is high res (every few sec), candles are 15m/1h.
-        // We will just overlay them based on time.
-
-        const cvdData: any[] = [];
-        const premiumData: any[] = [];
-
-        microHistory.forEach((h: any) => {
-            const ts = (new Date(h.timestamp).getTime() / 1000) as UTCTimestamp;
-
-            // Scale CVD to be visible? Use right scale or overlay?
-            // Best to use separate panes but library support is limited in this wrapper.
-            // We'll use the 'volume' pane for CVD if possible or just use overlay with separate scale.
-            // For now, let's try mapping to a separate scale ID if using multiple panes.
-
-            cvdData.push({ time: ts, value: h.cvd });
-            premiumData.push({
-                time: ts,
-                value: h.spread_usd,
-                color: h.spread_usd > 0 ? COLORS.bullish : COLORS.bearish
-            });
-        });
-
-        // Dedup by time
-        const uniqueCvd = [...new Map(cvdData.map(item => [item.time, item])).values()].sort((a, b) => a.time - b.time);
-        const uniquePrem = [...new Map(premiumData.map(item => [item.time, item])).values()].sort((a, b) => a.time - b.time);
-
-        if (showCvd) {
-            cvdSeriesRef.current.setData(uniqueCvd);
-        }
-        if (showPremium) {
-            premiumSeriesRef.current.setData(uniquePrem);
-        }
-
-    }, [microHistory, showCvd, showPremium]);
 
 
     // Crosshair Depth Intelligence
@@ -555,26 +496,7 @@ function AdvancedChart({
         });
 
 
-        // NEW: CVD Series - DISABLED
-        /*
-        cvdSeriesRef.current = chart.addLineSeries({
-            color: '#fbbf24', // Amber for CVD
-            lineWidth: 2,
-            priceScaleId: 'cvd', // Separate scale
-            priceFormat: { type: 'custom', formatter: (p: any) => `${(p / 1000).toFixed(1)}k` },
-            title: 'CVD'
-        });
-        */
 
-        // NEW: Premium Series (Histogram) - DISABLED
-        /*
-        premiumSeriesRef.current = chart.addHistogramSeries({
-            color: 'rgba(59, 130, 246, 0.15)', // Very subtle blue
-            priceScaleId: 'premium',
-            priceFormat: { type: 'custom', formatter: (p: any) => `$${p.toFixed(2)}` },
-            title: 'CB Prem'
-        });
-        */
 
         // Candlestick Series LAST
         // Candlestick Series LAST
@@ -595,30 +517,16 @@ function AdvancedChart({
 
         // Configure scales for layout
         // Configure scales for layout
+        // Configure scales for layout
+        // Main Chart: Top 80%
         chart.priceScale('right').applyOptions({
-            scaleMargins: { top: 0.05, bottom: 0.25 }, // Main chart top 75%
+            scaleMargins: { top: 0.05, bottom: 0.15 },
             autoScale: true,
         });
 
-        // CVD: Same area as chart but its own auto-scale - DISABLED
-        /*
-        chart.priceScale('cvd').applyOptions({
-            scaleMargins: { top: 0.05, bottom: 0.3 },
-            autoScale: true,
-        });
-        */
-
-        // Premium: Bottom 25% - DISABLED
-        /*
-        chart.priceScale('premium').applyOptions({
-            scaleMargins: { top: 0.75, bottom: 0 },
-            autoScale: true,
-        });
-        */
-
-        // Volume: Bottom 25%
+        // Volume: Bottom 15%
         chart.priceScale('volume').applyOptions({
-            scaleMargins: { top: 0.75, bottom: 0 },
+            scaleMargins: { top: 0.85, bottom: 0 },
             autoScale: true,
         });
 
@@ -666,9 +574,6 @@ function AdvancedChart({
             bbLowerRef.current = null;
             vwapRef.current = null;
             sarRef.current = null;
-            cvdSeriesRef.current = null;
-            premiumSeriesRef.current = null;
-            premiumSeriesRef.current = null;
             rsiSeriesRef.current = null;
             lastCandleRef.current = null;
         };
@@ -687,7 +592,18 @@ function AdvancedChart({
 
             try {
                 // ... fetch logic ...
-                const hlInterval = interval === '60' ? '1h' : interval === '240' ? '4h' : interval === 'D' ? '1d' : '15m';
+                let hlInterval = '15m'; // Default
+                if (interval === '1') hlInterval = '1m';
+                else if (interval === '3') hlInterval = '3m';
+                else if (interval === '5') hlInterval = '5m';
+                else if (interval === '15') hlInterval = '15m';
+                else if (interval === '30') hlInterval = '30m';
+                else if (interval === '60') hlInterval = '1h';
+                else if (interval === '120') hlInterval = '2h';
+                else if (interval === '240') hlInterval = '4h';
+                else if (interval === '480') hlInterval = '8h';
+                else if (interval === '720') hlInterval = '12h';
+                else if (interval === 'D') hlInterval = '1d';
 
                 // Fetch exactly 200 candles
                 const intervalMs = (interval === 'D' ? 1440 : parseInt(interval) || 15) * 60 * 1000;
@@ -1118,6 +1034,8 @@ function AdvancedChart({
                         >
                             <Target className="w-4 h-4" />
                         </button>
+
+
 
                         <div className="w-px h-4 bg-white/10 mx-1" />
 

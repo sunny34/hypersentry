@@ -41,7 +41,7 @@ export default function ArbScanner() {
                     spread: o.spread,
                     direction: o.direction,
                     confidence: 100
-                }));
+                })).filter((o: any) => Math.abs(o.spread) < 5000); // Filter out bad data (e.g. >5000% APR)
                 setOpportunities(ops);
                 setLastUpdated(new Date());
                 setBinanceStatus(res.data.binance_status);

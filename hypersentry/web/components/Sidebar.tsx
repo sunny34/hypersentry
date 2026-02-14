@@ -15,7 +15,8 @@ import {
     Upload,
     Plus,
     User as UserIcon,
-    BarChart3
+    BarChart3,
+    Fish,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useHyperliquidSession } from '@/hooks/useHyperliquidSession';
@@ -66,6 +67,8 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
             router.push('/arb');
         } else if (newView === 'risk') {
             router.push('/risk');
+        } else if (newView === 'whales') {
+            router.push('/whales');
         } else if (newView === 'settings') {
             router.push('/settings');
         } else if (pathname === '/terminal' || pathname === '/arb' || pathname === '/risk') {
@@ -207,6 +210,21 @@ export default function Sidebar({ view, setView, onImport, onAdd, currentView, o
                             </div>
                         )}
                     </button>
+
+                    <button
+                        onClick={() => handleViewChange('whales')}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'whales' || pathname === '/whales' ? 'bg-cyan-500/10 text-cyan-400' : 'text-gray-400 hover:bg-white/5 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}
+                        title={isCollapsed ? "Whale Tracker" : ""}
+                    >
+                        <Fish className="w-5 h-5 shrink-0" />
+                        {!isCollapsed && (
+                            <div className="flex items-center justify-between flex-1">
+                                <span className="font-medium whitespace-nowrap">Whale Tracker</span>
+                                <span className="text-[8px] bg-cyan-500/20 text-cyan-400 px-1 rounded font-black tracking-widest animate-pulse">NEW</span>
+                            </div>
+                        )}
+                    </button>
+
                     <button
                         onClick={() => handleViewChange('settings')}
                         className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${activeView === 'settings' ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-gray-400 hover:bg-white/5 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`}

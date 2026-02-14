@@ -30,24 +30,25 @@ class ConnectionManager:
             logger.info(f"WebSocket disconnected. Remaining: {len(self.active_connections)}")
 
     async def broadcast(self, message: Dict[str, Any]):
-        """Send message to all connected clients."""
+        """Parallel non-blocking broadcast to all connected clients."""
         if not self.active_connections:
             return
 
+        # Snapshot current connections to avoid race conditions
+        current_connections = list(self.active_connections)
         json_msg = json.dumps(message)
-        disconnected = []
         
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(json_msg)
-            except RuntimeError:
-                # Connection likely closed
-                disconnected.append(connection)
-            except Exception as e:
-                logger.error(f"Error broadcasting to client: {e}")
-                disconnected.append(connection)
+        # Concurrent send to avoid bottlenecking on slow clients
+        tasks = [connection.send_text(json_msg) for connection in current_connections]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        disconnected = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.warning(f"⚠️ Broadcast failed for client {i}: {result}")
+                disconnected.append(current_connections[i])
 
-        # Cleanup
+        # Cleanup dead connections
         for dead in disconnected:
             self.disconnect(dead)
 

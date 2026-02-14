@@ -42,15 +42,38 @@ class DebateAgent:
             }}
             """
             
-            response = client.models.generate_content(
-                model='gemini-1.5-flash',
-                contents=prompt,
-                config={"response_mime_type": "application/json"}
-            )
-            return json.loads(response.text)
+            # Retry logic for 429s
+            max_retries = 3
+            base_delay = 2
+            
+            for attempt in range(max_retries):
+                try:
+                    response = client.models.generate_content(
+                        model='gemini-flash-latest', 
+                        contents=prompt,
+                        config={"response_mime_type": "application/json"}
+                    )
+                    return json.loads(response.text)
+                except Exception as e:
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        if attempt < max_retries - 1:
+                            import time
+                            sleep_time = base_delay * (2 ** attempt)
+                            logger.warning(f"Agent {self.name} hit 429. Retrying in {sleep_time}s...")
+                            await asyncio.sleep(sleep_time)
+                            continue
+                    # If not 429 or retries exhausted, raise
+                    raise e
+                    
         except Exception as e:
-            logger.error(f"Agent {self.name} failed: {e}")
-            return {"text": "Divergent signal confirmed.", "evidence": "Neutral bias"}
+            import traceback
+            # Log full stack trace for debug
+            logger.error(f"Agent {self.name} failed after retries: {e}")
+            # Return actual error to UI (cleaner)
+            err_msg = str(e)
+            if "429" in err_msg:
+                return {"text": "Market Volatility High (API Rate Limit). Analysis Paused.", "evidence": "System Monitor"}
+            return {"text": f"Error: {err_msg[:50]}...", "evidence": "System Failure"}
 
 class MultiAgentDebate:
     def __init__(self):

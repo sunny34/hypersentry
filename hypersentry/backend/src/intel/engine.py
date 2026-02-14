@@ -8,6 +8,8 @@ from .providers.twitter import TwitterProvider
 from .providers.telegram import TelegramProvider
 from .providers.polymarket import PolymarketProvider
 from .providers.microstructure import MicrostructureProvider
+from .providers.microstructure import MicrostructureProvider
+from .filter import IntelFilter
 from .sentiment import SentimentAnalyzer
 from database import get_db_session
 from models import IntelItem
@@ -28,6 +30,7 @@ class IntelEngine:
             MicrostructureProvider()
         ]
         self.sentiment_analyzer = SentimentAnalyzer()
+        self.intel_filter = IntelFilter()
         self.cache = set() # To prevent duplicate broadcasts
         self.recent_items = [] # To store actual items for REST access
         self.is_running = False
@@ -69,18 +72,20 @@ class IntelEngine:
                                 self.cache.add(item["id"])
                     elif isinstance(res, Exception):
                         logger.error(f"Provider failed: {res}")
-
+                # Filter Noise & Duplicates
+                filtered_items = self.intel_filter.filter(new_items, self.recent_items)
+                
                 # Broadcast new intelligence
-                if new_items:
+                if filtered_items:
                     # 🚀 Perform Deep Sentiment Analysis (Step 4)
                     logger.info("🧠 Analyzing sentiment with Gemini 1.5 Flash...")
-                    await self.sentiment_analyzer.analyze_batch(new_items)
+                    await self.sentiment_analyzer.analyze_batch(filtered_items)
                     
                     # Persist to Database (Persistence Layer)
                     try:
                         import dateutil.parser
                         with get_db_session() as db:
-                            for item in new_items:
+                            for item in filtered_items:
                                 # Convert ISO string back to datetime for SQLite persistence
                                 dt_timestamp = item["timestamp"]
                                 if isinstance(dt_timestamp, str):
@@ -126,6 +131,79 @@ class IntelEngine:
                 logger.error(f"Intel Engine Error: {e}")
 
             await asyncio.sleep(self.polling_interval)
+
+    def get_global_sentiment(self) -> Dict[str, Any]:
+        """
+        Calculates a real-time 'Global Pulse' score (0-100).
+        Aggregates News, Prediction Markets, and Institutional Order Flow.
+        0 = Extreme Fear, 100 = Extreme Greed.
+        50 = Neutral.
+        """
+        score = 50.0
+        details = {"news": 0, "prediction": 0, "flow": 0}
+        
+        # 1. News Sentiment (Last 20 items)
+        for item in self.recent_items[:20]:
+            s_score = item.get("sentiment_score", 0)
+            if s_score > 0: score += 1
+            elif s_score < 0: score -= 1
+            
+        details["news"] = score - 50 # Tracking the delta
+        
+        # 2. Prediction Markets (Polymarket)
+        # Scan for high-probability macro/crypto events
+        poly_impact = 0
+        for item in self.recent_items[:50]:
+            if item.get("metadata", {}).get("type") == "prediction":
+                prob = item.get("metadata", {}).get("probability", 50)
+                # If prob > 70% and sentiment is bullish -> Add score
+                # This is a heuristic: "Prediction: BTC to 100k" with 80% YES is bullish
+                # The sentiment field is already set by Polymarket provider based on YES%
+                if item.get("sentiment") == "bullish":
+                    poly_impact += 2
+                elif item.get("sentiment") == "bearish":
+                    poly_impact -= 2
+        
+        score += poly_impact
+        details["prediction"] = poly_impact
+
+        # 3. Institutional Flow (BTC Premium/CVD)
+        flow_impact = 0
+        micro_provider = next((p for p in self.providers if p.name == "microstructure"), None)
+        if micro_provider and 'BTC' in micro_provider.states:
+            state = micro_provider.states['BTC']
+            spread = state.get("cb_spread_usd", 0)
+            cvd = state.get("cvd", 0)
+            
+            # Coinbase Premium Impact
+            if spread > 10: flow_impact += 5
+            elif spread > 30: flow_impact += 10
+            elif spread < -10: flow_impact -= 5
+            elif spread < -30: flow_impact -= 10
+            
+            # CVD Trend Impact
+            if cvd > 1000: flow_impact += 5
+            elif cvd < -1000: flow_impact -= 5
+            
+        score += flow_impact
+        details["flow"] = flow_impact
+        
+        # Clamp
+        score = max(0, min(100, score))
+        
+        # Determine Label
+        label = "Neutral"
+        if score >= 80: label = "Extreme Greed"
+        elif score >= 60: label = "Greed"
+        elif score <= 20: label = "Extreme Fear"
+        elif score <= 40: label = "Fear"
+        
+        return {
+            "score": round(score),
+            "label": label,
+            "breakdown": details,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
 
     def stop(self):
         self.is_running = False

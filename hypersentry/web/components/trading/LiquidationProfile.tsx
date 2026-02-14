@@ -34,7 +34,6 @@ export default function LiquidationProfile({
         // Fallback for OI if data is still loading/missing
         const effectiveOI = openInterest || 2500000; // 2.5M fallback for visual presence
 
-        console.log('[LiqProfile] Calc:', { currentPrice, effectiveOI, fundingRate, minPrice, maxPrice });
 
         if (!currentPrice || currentPrice <= 0) {
             console.warn('[LiqProfile] No current price');
