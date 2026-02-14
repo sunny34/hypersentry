@@ -22,8 +22,19 @@ export const useWebSocket = (url: string, onMessage?: (data: any) => void) => {
         let targetUrl = url;
         if (typeof window !== 'undefined') {
             const host = window.location.hostname;
-            if (targetUrl.includes('localhost')) targetUrl = targetUrl.replace('localhost', host);
-            if (targetUrl.includes('127.0.0.1')) targetUrl = targetUrl.replace('127.0.0.1', host);
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+            // If it's a relative URL like "/ws", prepend host/protocol
+            if (targetUrl.startsWith('/')) {
+                const port = window.location.port ? `:${window.location.port}` : '';
+                targetUrl = `${protocol}//${host}${port}${targetUrl}`;
+            } else if (targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1')) {
+                targetUrl = targetUrl.replace('localhost', host).replace('127.0.0.1', host);
+                // Ensure protocol matches current security context if not specified
+                if (!targetUrl.startsWith('ws')) {
+                    targetUrl = `${protocol}//${targetUrl}`;
+                }
+            }
         }
 
         if (ws.current) {

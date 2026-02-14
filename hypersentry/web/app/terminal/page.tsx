@@ -19,6 +19,7 @@ import StatusBar from '@/components/trading/StatusBar';
 import ResizableLayout from '@/components/trading/ResizableLayout';
 import { TerminalSettingsProvider, useTerminalSettings } from '@/contexts/TerminalSettingsContext';
 import TerminalSettingsModal from '@/components/modals/TerminalSettingsModal';
+import { getWsUrl } from '@/lib/constants';
 
 // Lazy load heavy components for better initial load performance
 const ChartTabs = lazy(() => import('@/components/trading/ChartTabs'));
@@ -157,7 +158,7 @@ function TradingTerminalContent() {
 
     // WS Hook
     const { isConnected: isWsConnected, lastMessage, sendMessage } = useWebSocket(
-        `ws://127.0.0.1:8000/ws`,
+        getWsUrl(),
         // High-perf direct pump to store
         useCallback((data: any) => {
             if (data.type === 'agg_update') {
