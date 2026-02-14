@@ -115,10 +115,13 @@ class DataAggregator:
             for i, side_l in enumerate([bids, asks]):
                 side = "bid" if i == 0 else "ask"
                 for l in side_l:
-                    if float(l["sz"]) > avg * 8:
+                    sz = float(l["sz"])
+                    if sz > avg * 15:
+                        walls.append({"px": l["px"], "sz": l["sz"], "side": side, "strength": "massive"})
+                    elif sz > avg * 8:
                         walls.append({"px": l["px"], "sz": l["sz"], "side": side, "strength": "major"})
         except: pass
-        return walls[:5]
+        return walls[:8]
 
     async def _broadcast_loop(self):
         while self.is_running:

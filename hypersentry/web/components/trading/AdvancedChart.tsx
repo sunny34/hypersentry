@@ -6,6 +6,7 @@ import axios from 'axios';
 import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw, Maximize2, Eye, EyeOff, Shield, Filter, Settings, Minimize2, ShieldAlert, Activity, BarChart3, Binary, Target, Zap, BrainCircuit } from 'lucide-react';
 import { ColorType, CrosshairMode, LineStyle, createChart, IChartApi, ISeriesApi, Time, UTCTimestamp, SeriesMarker } from 'lightweight-charts';
 import { useHyperliquidWS } from '../../hooks/useHyperliquidWS';
+import { useMarketStore, LiquidityWall } from '../../store/useMarketStore';
 import { Indicators } from '../../utils/indicators';
 import LiquidationProfile from './LiquidationProfile';
 import LiquidationHeatmap from './LiquidationHeatmap';
@@ -93,15 +94,16 @@ function AdvancedChart({
     const [liquidationMarkers, setLiquidationMarkers] = useState<SeriesMarker<Time>[]>([]);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [showWalls, setShowWalls] = useState(true);
-    const [l2Levels, setL2Levels] = useState<{ bids: any[], asks: any[] }>({ bids: [], asks: [] });
-    const [externalWalls, setExternalWalls] = useState<{ walls: any[], intelligence: any }>({ walls: [], intelligence: {} });
-    const [minWallSzUsd, setMinWallSzUsd] = useState(100000);
-    const [macroAlpha, setMacroAlpha] = useState<any[]>([]);
-    const [volumeProfile, setVolumeProfile] = useState<any[]>([]);
     const [hoveredDepth, setHoveredDepth] = useState<{ bids: number, asks: number } | null>(null);
-    const [signals, setSignals] = useState<any[]>([]);
 
-    const { subscribe, addListener } = useHyperliquidWS();
+    const [signals, setSignals] = useState<any[]>([]);
+    const [externalWalls, setExternalWalls] = useState<any>({ walls: [], intelligence: {} });
+    const [macroAlpha, setMacroAlpha] = useState<any[]>([]);
+
+    // Context & Store
+    const { status: wsStatus, subscribe, addListener } = useHyperliquidWS();
+    const marketData = useMarketStore(state => state.marketData[symbol]);
+
     const lastCandleRef = useRef<any>(null);
     const wallAgeRef = useRef<Map<string, number>>(new Map()); // ex-side-px -> firstSeenTimestamp
     const [persistenceScore, setPersistenceScore] = useState(0);
@@ -109,26 +111,6 @@ function AdvancedChart({
 
 
     // ... (Liquidation fetch effect remains same)
-
-    // 6. WebSocket L2 Subscription for Wall Overlay
-    useEffect(() => {
-        if (!symbol) return;
-        subscribe({ type: 'l2Book', coin: symbol });
-
-        const removeListener = addListener('l2Book', (data: any) => {
-            if (data.coin === symbol && data.levels && data.levels.length === 2) {
-                // Slice to top 40 levels for performance
-                setL2Levels({
-                    bids: data.levels[0].slice(0, 40),
-                    asks: data.levels[1].slice(0, 40)
-                });
-            }
-        });
-
-        return () => {
-            if (removeListener) removeListener();
-        };
-    }, [symbol, subscribe, addListener]);
 
     // 7. Render Positions & Orders & Walls on Chart
     useEffect(() => {
@@ -186,36 +168,26 @@ function AdvancedChart({
             });
         }
 
-        // C. Render Liquidity Walls (Top 3 Bids/Asks by size)
-        if (showWalls && l2Levels.bids.length > 0) {
-            // Find significant walls (outliers > 2x avg of top 20 or simply large relative to current view)
-            // Simple heuristic: Top 3 largest orders in the visible book
+        // C. Render Liquidity Walls (From Backend Aggregator)
+        if (showWalls && marketData?.walls) {
+            marketData.walls.forEach(wall => {
+                const px = parseFloat(wall.px);
+                const sz = parseFloat(wall.sz);
+                const isBid = wall.side === 'bid';
 
-            // Sort by size desc
-            const topBids = [...l2Levels.bids].sort((a, b) => parseFloat(b.sz) - parseFloat(a.sz)).slice(0, 3);
-            const topAsks = [...l2Levels.asks].sort((a, b) => parseFloat(b.sz) - parseFloat(a.sz)).slice(0, 3);
-
-            [...topBids, ...topAsks].forEach(level => {
-                const px = parseFloat(level.px);
-                const sz = parseFloat(level.sz);
-                const isBid = l2Levels.bids.includes(level);
-
-                // Only show if substantial (e.g. > $50k value - this threshold should be dynamic but hardcoded for now)
-                if (px * sz > 10000) {
-                    const line = candlestickSeriesRef.current?.createPriceLine({
-                        price: px,
-                        color: isBid ? 'rgba(16, 185, 129, 0.3)' : 'rgba(244, 63, 94, 0.3)',
-                        lineWidth: sz > 1000 ? 2 : 1, // Thicker for massive walls
-                        lineStyle: LineStyle.Dotted,
-                        axisLabelVisible: false, // Don't clutter axis
-                        title: `Wall: ${Number(sz).toFixed(2)}`,
-                    });
-                    if (line) wallSeriesRef.current.push(line);
-                }
+                const line = candlestickSeriesRef.current?.createPriceLine({
+                    price: px,
+                    color: isBid ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)',
+                    lineWidth: wall.strength === 'massive' ? 2 : 1,
+                    lineStyle: LineStyle.Dotted,
+                    axisLabelVisible: false,
+                    title: `Wall: ${Number(sz).toFixed(0)}`,
+                });
+                if (line) wallSeriesRef.current.push(line);
             });
         }
 
-    }, [positions, openOrders, l2Levels, showWalls, symbol]);
+    }, [positions, openOrders, marketData?.walls, showWalls, symbol]);
 
     // ... (Nexus Signals effect remains same)
 
@@ -230,17 +202,16 @@ function AdvancedChart({
         if (!chartRef.current || !candlestickSeriesRef.current) return;
 
         const handleCrosshair = (param: any) => {
-            if (!param.point) {
+            if (!param.point || !marketData?.book) {
                 setHoveredDepth(null);
                 return;
             }
             const p = candlestickSeriesRef.current?.coordinateToPrice(param.point.y);
             if (p) {
-                // Find total liquidity within 0.1% of this price
                 const range = p * 0.001;
-                const bDepth = l2Levels.bids.filter((b: any) => Math.abs(parseFloat(b.px) - p) < range)
+                const bDepth = (marketData.book[0] || []).filter((b: any) => Math.abs(parseFloat(b.px) - p) < range)
                     .reduce((acc: number, b: any) => acc + parseFloat(b.sz) * parseFloat(b.px), 0);
-                const aDepth = l2Levels.asks.filter((a: any) => Math.abs(parseFloat(a.px) - p) < range)
+                const aDepth = (marketData.book[1] || []).filter((a: any) => Math.abs(parseFloat(a.px) - p) < range)
                     .reduce((acc: number, a: any) => acc + parseFloat(a.sz) * parseFloat(a.px), 0);
                 setHoveredDepth({ bids: bDepth, asks: aDepth });
             }
@@ -248,7 +219,7 @@ function AdvancedChart({
 
         chartRef.current.subscribeCrosshairMove(handleCrosshair);
         return () => chartRef.current?.unsubscribeCrosshairMove(handleCrosshair);
-    }, [l2Levels]);
+    }, [marketData?.book]);
 
     // Range Update logic
     const updateRange = useCallback(() => {
@@ -893,7 +864,7 @@ function AdvancedChart({
                         height={chartHeight}
                         maxPrice={visibleRange.max}
                         minPrice={visibleRange.min}
-                        levels={l2Levels}
+                        levels={{ bids: marketData?.book?.[0] || [], asks: marketData?.book?.[1] || [] }}
                     />
                 </div>
             )}
