@@ -57,14 +57,11 @@ htmlcov/
 celerybeat-schedule
 celerybeat.pid
 
-# Documentation and Project State
-AGENTS.MD
-AUDIT_REPORT.md
-DEPLOYMENT.md
-IMPROVEMENT_PLAN.md
-TRADER_PLAYBOOK.md
-architecture.md
-fix_summary.md
-project_knowledge.md
-sentry.db
+# Local databases
+*.db
+*.sqlite3
+
+# Agent/Generated state
+.gemini/
+.agent/
 

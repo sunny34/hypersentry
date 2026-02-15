@@ -1,0 +1,138 @@
+# ============================================
+# HyperSentry - Production Cluster
+# Optimized for Coolify/Self-Hosted PaaS
+# ============================================
+
+services:
+  # ----------------------------------------
+  # PostgreSQL Database (Persistence)
+  # ----------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hypersentry}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-hypersentry}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------
+  # Redis (Cache & Celery Backend)
+  # ----------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------
+  # Kafka (Distributed Intelligence Bus)
+  # ----------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    restart: always
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:29093
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # ----------------------------------------
+  # FastAPI API Gateway (Hardened)
+  # ----------------------------------------
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+      target: production
+    restart: always
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hypersentry}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hypersentry}
+      - REDIS_URL=redis://redis:6379/0
+      - EVENT_BUS_BACKEND=kafka
+      - EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - EVENT_RELAY_SOURCE=kafka
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - HL_ACCOUNT_ADDRESS=${HL_ACCOUNT_ADDRESS}
+      - HL_PRIVATE_KEY=${HL_PRIVATE_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    # Uses Gunicorn with Uvicorn workers for production concurrency
+    command: sh -c "alembic upgrade head && gunicorn main:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 --workers 4 --timeout 120"
+
+  # ----------------------------------------
+  # Intelligence Worker (Asynchronous)
+  # ----------------------------------------
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+      target: production
+    restart: always
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hypersentry}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hypersentry}
+      - REDIS_URL=redis://redis:6379/0
+      - EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      - redis
+      - kafka
+    command: celery -A celery_app worker --loglevel=info
+
+  # ----------------------------------------
+  # Next.js Application (Optimized Node)
+  # ----------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      target: runner
+    restart: always
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
