@@ -1,0 +1,172 @@
+# ============================================
+# HyperSentry - Local Development
+# docker-compose up --build
+# ============================================
+
+services:
+  # ----------------------------------------
+  # PostgreSQL Database
+  # ----------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: hypersentry-db
+    environment:
+      POSTGRES_USER: hypersentry
+      POSTGRES_PASSWORD: hypersentry_dev
+      POSTGRES_DB: hypersentry
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hypersentry"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------
+  # Redis (for Celery)
+  # ----------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: hypersentry-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------
+  # Kafka (for Event Bus)
+  # ----------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: hypersentry-kafka
+    hostname: kafka
+    ports:
+      - "9094:9094"
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9094
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:29093
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ----------------------------------------
+  # FastAPI Backend
+  # ----------------------------------------
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+      target: base  # Use base for dev (no user switch)
+    container_name: hypersentry-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://hypersentry:hypersentry_dev@postgres:5432/hypersentry
+      - HL_ACCOUNT_ADDRESS=${HL_ACCOUNT_ADDRESS}
+      - HL_PRIVATE_KEY=${HL_PRIVATE_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-kafka}
+      - EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS=${EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      - EVENT_BUS_KAFKA_TOPIC=${EVENT_BUS_KAFKA_TOPIC:-hypersentry.events}
+      - EVENT_RELAY_SOURCE=${EVENT_RELAY_SOURCE:-kafka}
+      - EVENT_RELAY_KAFKA_GROUP_ID=${EVENT_RELAY_KAFKA_GROUP_ID:-hypersentry-event-relay}
+    volumes:
+      - ./backend:/app  # Hot reload for development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
+
+  # ----------------------------------------
+  # Celery Worker
+  # ----------------------------------------
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+      target: base
+    container_name: hypersentry-worker
+    environment:
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://hypersentry:hypersentry_dev@postgres:5432/hypersentry
+      - HL_ACCOUNT_ADDRESS=${HL_ACCOUNT_ADDRESS}
+      - HL_PRIVATE_KEY=${HL_PRIVATE_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-kafka}
+      - EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS=${EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      - EVENT_BUS_KAFKA_TOPIC=${EVENT_BUS_KAFKA_TOPIC:-hypersentry.events}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && celery -A celery_app worker --loglevel=info"
+
+  # ----------------------------------------
+  # Next.js Frontend (Dev mode)
+  # ----------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      target: deps  # Just use deps stage for dev
+    container_name: hypersentry-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./web:/app
+      - /app/node_modules  # Keep node_modules in container
+    working_dir: /app
+    command: npm run dev
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:

@@ -1,0 +1,13 @@
+# Install app/runtime deps first
+-r requirements.txt
+
+# Test tooling
+pytest
+pytest-cov
+coverage
+
+# Lint/format/type-check tooling
+ruff
+black
+mypy
+pre-commit
