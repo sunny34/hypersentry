@@ -35,14 +35,43 @@ class RSSProvider(IntelProvider):
                     if hasattr(entry, 'published_parsed'):
                         dt = datetime.datetime(*entry.published_parsed[:6])
                     
-                    all_news.append(self.normalize(
+                    content = entry.get('summary', '') or entry.get('description', '')
+                    title = entry.title
+                    
+                    # 1. High Impact Detection
+                    high_impact_keywords = [
+                        "BREAKING", "URGENT", "HACK", "EXPLOIT", "STOLEN", "SEC", "ETF", 
+                        "APPROVAL", "BANNED", "LAWSUIT", "CRASH", "HALT", "LIQUIDATION"
+                    ]
+                    is_high_impact = any(kw in title.upper() or kw in content.upper() for kw in high_impact_keywords)
+                    
+                    # 2. Basic Sentiment Logic
+                    bullish_keywords = ["SURGE", "ATH", "SUPPORT", "INFLOW", "BUY", "ADOPTION", "WHALE BUY"]
+                    bearish_keywords = ["DUMP", "OUTFLOW", "SELL", "DIP", "SINK", "INVESTIGATION", "REJECTED"]
+                    
+                    sentiment = "neutral"
+                    if any(kw in title.upper() for kw in bullish_keywords):
+                        sentiment = "bullish"
+                    elif any(kw in title.upper() for kw in bearish_keywords):
+                        sentiment = "bearish"
+                    
+                    item = self.normalize(
                         raw_id=entry.link,
-                        title=entry.title,
-                        content=entry.get('summary', ''),
+                        title=f"[{source_name}] {title}",
+                        content=content,
                         url=entry.link,
                         timestamp=dt,
-                        sentiment="neutral"
-                    ))
+                        sentiment=sentiment
+                    )
+                    
+                    item["is_high_impact"] = is_high_impact
+                    item["metadata"] = {
+                        "source_name": source_name,
+                        "author": entry.get('author', 'Unknown'),
+                        "tags": [t.get('term') for t in entry.get('tags', [])] if hasattr(entry, 'tags') else []
+                    }
+                    
+                    all_news.append(item)
             except Exception as e:
                 logger.warning("Error fetching RSS from source=%s err=%s", source_name, e)
                 

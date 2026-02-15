@@ -52,14 +52,17 @@ class TelegramProvider(IntelProvider):
                             high_impact_terms = ["LISTING", "BINANCE", "UPBIT", "COINBASE", "HACK", "EXPLOIT", "STOLEN", "PARTNERSHIP", "MAINNET"]
                             is_high_impact = any(term in text.upper() for term in high_impact_terms)
                             
-                            # 3. Format Title
+                            # 3. Format Title & Source Info
+                            chat = message.get("chat", {})
+                            chat_title = chat.get("title") or chat.get("username") or "Private"
+                            
                             # If tickers found, start with them
                             if tickers:
                                 ticker_str = " ".join([f"${t.upper()}" for t in tickers[:3]])
-                                title = f"TG Alpha {ticker_str}: {text[:80]}..."
+                                title = f"[{chat_title}] {ticker_str}: {text[:80]}..."
                             else:
                                 lines = text.split("\n", 1)
-                                title = f"TG Alpha: {lines[0][:100]}"
+                                title = f"[{chat_title}] {lines[0][:100]}"
                             
                             content = text
                             

@@ -8,6 +8,7 @@ from .providers.twitter import TwitterProvider
 from .providers.telegram import TelegramProvider
 from .providers.polymarket import PolymarketProvider
 from .providers.microstructure import MicrostructureProvider
+from .providers.worldmonitor import WorldMonitorProvider
 from .filter import IntelFilter
 from .sentiment import SentimentAnalyzer
 from database import get_db_session
@@ -26,7 +27,8 @@ class IntelEngine:
             TwitterProvider(),
             TelegramProvider(),
             PolymarketProvider(),
-            MicrostructureProvider()
+            MicrostructureProvider(),
+            WorldMonitorProvider()
         ]
         self.sentiment_analyzer = SentimentAnalyzer()
         self.intel_filter = IntelFilter()
