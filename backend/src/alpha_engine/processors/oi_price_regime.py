@@ -32,28 +32,50 @@ class OIRegimeClassifier:
         Calculates the regime and a confidence score based on the delta magnitudes.
         Confidence is higher when moves in both price and OI are significant.
         """
-        if price_1m_ago <= 0:
+        if state.price <= 0:
             return {"regime": MarketRegime.NEUTRAL, "confidence": 0.0}
+        
+        # Use price_1m_ago if provided, otherwise assume small change
+        if price_1m_ago <= 0:
+            price_1m_ago = state.price * 0.999  # Assume slight decline if unknown
             
         price_delta = (state.price - price_1m_ago) / price_1m_ago
         oi_delta = state.oi_delta_1m
         
-        # Scaling confidence: Magnitude of deltas relative to baseline noise
-        price_strength = min(abs(price_delta) / 0.001, 1.0) # 0.1% move = full weight
-        oi_strength = min(abs(oi_delta) / 1000.0, 1.0) if state.open_interest > 0 else 0.5
+        # Scaling confidence: More sensitive to price moves
+        # Even small price changes should generate some signal
+        price_strength = min(abs(price_delta) / 0.0005, 1.0)  # 0.05% move = full weight
+        
+        # OI delta sensitivity - if no OI delta data, use neutral
+        if state.open_interest > 0 and oi_delta != 0:
+            oi_strength = min(abs(oi_delta) / 500.0, 1.0)  # More sensitive
+        else:
+            oi_strength = 0.3  # Default moderate confidence when no OI data
+        
         confidence = (price_strength + oi_strength) / 2.0
 
-        if price_delta > 0 and oi_delta > 0:
-            regime = MarketRegime.AGGRESSIVE_LONG_BUILD
-        elif price_delta < 0 and oi_delta > 0:
-            regime = MarketRegime.AGGRESSIVE_SHORT_BUILD
-        elif price_delta > 0 and oi_delta < 0:
-            regime = MarketRegime.SHORT_COVER
-        elif price_delta < 0 and oi_delta < 0:
-            regime = MarketRegime.LONG_UNWIND
+        # Determine regime based on price and OI direction
+        if price_delta > 0.0001:  # Price moving up
+            if oi_delta > 0:
+                regime = MarketRegime.AGGRESSIVE_LONG_BUILD
+            else:
+                regime = MarketRegime.SHORT_COVER
+        elif price_delta < -0.0001:  # Price moving down
+            if oi_delta > 0:
+                regime = MarketRegime.AGGRESSIVE_SHORT_BUILD
+            else:
+                regime = MarketRegime.LONG_UNWIND
         else:
-            regime = MarketRegime.NEUTRAL
-            confidence = 0.0
+            # Price essentially unchanged - check if we have meaningful OI movement
+            if oi_delta > 50:
+                regime = MarketRegime.STABLE_ACCUMULATION
+            elif oi_delta < -50:
+                regime = MarketRegime.STABLE_DISTRIBUTION
+            else:
+                regime = MarketRegime.NEUTRAL
+            
+        # Ensure minimum confidence
+        confidence = max(confidence, 0.3)
             
         return {
             "regime": regime,

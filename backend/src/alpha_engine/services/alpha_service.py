@@ -418,16 +418,19 @@ class AlphaService:
         Used by sync/on-demand services.
         """
         state = await global_state_store.get_state(symbol)
-        if not state or not self.price_history_cache.get(symbol):
+        if not state:
             return None
 
-        p_hist = self.price_history_cache[symbol]
-        p_1m_ago = p_hist[max(0, len(p_hist)-60)] # Approx 1m if 1s updates
-        
+        # Use current price if no history, or use history if available
+        current_price = state.price
+        p_hist = self.price_history_cache.get(symbol, [current_price] * 10)
+        # Use history-based price if we have enough data, otherwise use current
+        p_1m_ago = p_hist[-10] if len(p_hist) >= 10 else current_price
+
         v_hist = self.volume_history_cache.get(symbol, [])
         oi_res = OIRegimeClassifier.classify(state, p_1m_ago)
         vol_res = VolatilityDetector.detect(state, p_hist, v_hist)
-        
+
         return AlphaSignal(
             symbol=symbol,
             regime=oi_res["regime"],

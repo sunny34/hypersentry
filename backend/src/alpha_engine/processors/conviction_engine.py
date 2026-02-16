@@ -6,11 +6,12 @@ from src.alpha_engine.models.footprint_models import FootprintResult
 from src.alpha_engine.models.conviction_models import ConvictionResult, ConvictionComponent
 
 # Configuration Weights
-W_REGIME = 0.25
-W_LIQUIDATION = 0.25
+# Regime is the primary signal - it should have strong influence
+W_REGIME = 0.35
+W_LIQUIDATION = 0.15
 W_FOOTPRINT = 0.25
-W_FUNDING = 0.15
-W_VOLATILITY = 0.10
+W_FUNDING = 0.10
+W_VOLATILITY = 0.15
 
 class ConvictionEngine:
     """
@@ -98,44 +99,60 @@ class ConvictionEngine:
 
     @staticmethod
     def _calculate_regime_score(sig: AlphaSignal) -> Tuple[float, str]:
+        # Convert enum to string for lookup
+        regime_str = str(sig.regime) if hasattr(sig.regime, 'value') else str(sig.regime)
+        
         mapping = {
             "AGGRESSIVE_LONG_BUILD": 0.7,
             "AGGRESSIVE_SHORT_BUILD": -0.7,
             "SHORT_COVER": 0.4,
             "LONG_UNWIND": -0.4,
             "STABLE_ACCUMULATION": 0.2,
-            "STABLE_DISTRIBUTION": -0.2
+            "STABLE_DISTRIBUTION": -0.2,
+            "NEUTRAL": 0.0,
         }
-        base = mapping.get(sig.regime, 0.0)
-        score = base * sig.regime_confidence
+        base = mapping.get(regime_str, 0.0)
         
-        desc = f"Market Regime: {sig.regime.replace('_', ' ').title()} (Conf: {sig.regime_confidence})"
+        # Ensure minimum confidence so regime can influence conviction
+        # Even low confidence regimes should have some weight
+        effective_confidence = max(sig.regime_confidence, 0.3)
+        
+        score = base * effective_confidence
+        
+        desc = f"Market Regime: {sig.regime.replace('_', ' ').title()} (Conf: {sig.regime_confidence:.2f})"
         return score, desc
 
     @staticmethod
     def _calculate_liquidation_score(sig: LiquidationProjectionResult) -> Tuple[float, str]:
         # Benchmark 1%
-        up_1 = sig.upside.get("1.0%", 1.0)
-        down_1 = sig.downside.get("1.0%", 1.0)
+        up_1 = sig.upside.get("1.0%", 0.0)
+        down_1 = sig.downside.get("1.0%", 0.0)
         
-        # Protect against zeros
-        up_1 = max(up_1, 1.0)
-        down_1 = max(down_1, 1.0)
+        # If we have liquidation data, use it for signal
+        total_liq = up_1 + down_1
         
-        ratio = up_1 / down_1
-        # tanh centers at 0 when ratio is 1
-        score = math.tanh(ratio - 1)
+        if total_liq > 0:
+            # Have liquidation data - use ratio
+            up_1 = max(up_1, 0.01)  # Avoid division issues
+            down_1 = max(down_1, 0.01)
+            ratio = up_1 / down_1
+            score = math.tanh(ratio - 1)
+            desc = f"Liquidation Imbalance: {ratio:.2f}x Upside vs Downside (${total_liq:,.0f} total)"
+        else:
+            # No liquidation data - return neutral but not zero
+            # This allows conviction to still be driven by other factors
+            score = 0.0
+            desc = "No liquidation data available"
         
-        desc = f"Liquidation Imbalance: {ratio:.2f}x Upside vs Downside"
         return score, desc
 
     @staticmethod
     def _calculate_footprint_score(sig: FootprintResult) -> Tuple[float, str]:
-        # Internal weights for footprint
-        W_SWEEP = 0.4
-        W_ABSORPTION = 0.3
-        W_IMBALANCE = 0.2
-        W_IMPULSE = 0.1
+        # Internal weights for footprint - increase imbalance weight since it's always available
+        W_SWEEP = 0.25
+        W_ABSORPTION = 0.20
+        W_IMBALANCE = 0.40  # Increased weight - this is always available from state
+        W_IMPULSE = 0.15
         
         # Normalize sub-components
         sweep_val = 0.0
@@ -146,7 +163,9 @@ class ConvictionEngine:
         if sig.absorption.event == "BUY_ABSORPTION": abs_val = sig.absorption.strength / 5.0 # normalized
         elif sig.absorption.event == "SELL_ABSORPTION": abs_val = -sig.absorption.strength / 5.0
             
-        imb_val = math.tanh(sig.imbalance.z_score / 2.0)
+        # Use imbalance more aggressively - even small z-scores provide signal
+        imb_z = sig.imbalance.z_score
+        imb_val = math.tanh(imb_z / 2.0)  # More responsive to z-score
         
         imp_val = 0.0
         if sig.impulse.event == "BULLISH_IMPULSE": imp_val = sig.impulse.strength / 3.0
@@ -158,7 +177,8 @@ class ConvictionEngine:
         reasons = []
         if sig.sweep.event: reasons.append(f"{sig.sweep.event} spotted")
         if sig.absorption.event: reasons.append(f"{sig.absorption.event} detected")
-        if abs(sig.imbalance.z_score) > 1.5: reasons.append(f"Flow imbalance z-score: {sig.imbalance.z_score}")
+        # Always include imbalance info if there's any meaningful reading
+        if abs(imb_z) > 0.3: reasons.append(f"Flow imbalance z-score: {imb_z:.2f}")
         
         desc = ". ".join(reasons) if reasons else "Neutral order flow"
         return score, desc
