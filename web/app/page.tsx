@@ -1,15 +1,17 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
-import { Activity, Shield, Zap, Trash2, Plus, Upload, X, Eye, AlertTriangle, Sparkles, Menu } from 'lucide-react';
+import { Activity, Shield, Zap, Trash2, Plus, Upload, X, Eye, AlertTriangle, Sparkles, Menu, Loader2 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
-import BridgeAlerts from '@/components/BridgeAlerts';
 import { useAuth } from '@/contexts/AuthContext';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useSidebar } from '@/contexts/SidebarContext';
-import AddWalletModal from '@/components/modals/AddWalletModal';
-import ImportModal from '@/components/modals/ImportModal';
+
+// Lazy load heavy components
+const BridgeAlerts = lazy(() => import('@/components/BridgeAlerts'));
+const AddWalletModal = lazy(() => import('@/components/modals/AddWalletModal'));
+const ImportModal = lazy(() => import('@/components/modals/ImportModal'));
 
 // API Base URL - configured via environment variable for production
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -207,7 +209,9 @@ export default function Home() {
             </div>
 
             {/* Bridge Alerts */}
-            <BridgeAlerts apiUrl={API_URL} />
+            <Suspense fallback={<div className="h-40 rounded-3xl bg-gray-900/30 animate-pulse flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-600" /></div>}>
+              <BridgeAlerts apiUrl={API_URL} />
+            </Suspense>
 
             {/* Wallets Table */}
             <div className="rounded-3xl bg-gradient-to-br from-gray-900/60 to-gray-900/30 border border-gray-800/50 backdrop-blur-xl overflow-hidden">
@@ -272,8 +276,10 @@ export default function Home() {
         )}
 
         {/* Global Modals */}
-        <AddWalletModal isOpen={showAdd} onClose={() => setShowAdd(false)} onSuccess={fetchStats} />
-        <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onSuccess={fetchStats} />
+        <Suspense fallback={null}>
+          {showAdd && <AddWalletModal isOpen={showAdd} onClose={() => setShowAdd(false)} onSuccess={fetchStats} />}
+          {showImport && <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onSuccess={fetchStats} />}
+        </Suspense>
 
       </main>
     </div>

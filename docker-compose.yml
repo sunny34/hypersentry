@@ -14,6 +14,8 @@ services:
       POSTGRES_USER: hypersentry
       POSTGRES_PASSWORD: hypersentry_dev
       POSTGRES_DB: hypersentry
+      # Autovacuum to prevent bloat
+      POSTGRES_MAX_CONNECTIONS: 20
     ports:
       - "5432:5432"
     volumes:
@@ -32,6 +34,7 @@ services:
     container_name: hypersentry-redis
     ports:
       - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly no
     volumes:
       - redis_data:/data
     healthcheck:
@@ -64,6 +67,15 @@ services:
       - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
       - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+      # Size limits to prevent disk bloat
+      - KAFKA_LOG_RETENTION_HOURS=24
+      - KAFKA_LOG_RETENTION_BYTES=524288000  # 500MB max
+      - KAFKA_LOG_SEGMENT_BYTES=104857600    # 100MB per segment
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+      - KAFKA_LOG_CLEANUP_POLICY=delete
+      - KAFKA_LOG_CLEANUP_MS=300000
+      - KAFKA_CONTROLLER_LOG_FLUSH_MS=1000
+      - KAFKA_LOG_FLUSH_INTERVAL_MESSAGES=10000
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -102,6 +114,9 @@ services:
       - EVENT_BUS_KAFKA_TOPIC=${EVENT_BUS_KAFKA_TOPIC:-hypersentry.events}
       - EVENT_RELAY_SOURCE=${EVENT_RELAY_SOURCE:-kafka}
       - EVENT_RELAY_KAFKA_GROUP_ID=${EVENT_RELAY_KAFKA_GROUP_ID:-hypersentry-event-relay}
+      - LIQUIDATION_FEED_ENABLE=${LIQUIDATION_FEED_ENABLE:-true}
+      - LIQUIDATION_WS_ENABLE=${LIQUIDATION_WS_ENABLE:-true}
+      - LIQUIDATION_SYMBOLS=${LIQUIDATION_SYMBOLS:-BTC,ETH,SOL}
     volumes:
       - ./backend:/app  # Hot reload for development
     depends_on:

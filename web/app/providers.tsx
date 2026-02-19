@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import * as React from 'react';
 import {
@@ -27,7 +27,7 @@ import '@rainbow-me/rainbowkit/styles.css';
 
 const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID;
 if (!walletConnectProjectId) {
-    console.warn('⚠️ NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID not set in .env.local — wallet connections will fail. Get one at https://cloud.walletconnect.com');
+    console.warn('⚠️ NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID not set in .env.local — wallet connections will fail.');
 }
 
 const config = getDefaultConfig({
@@ -47,7 +47,7 @@ const config = getDefaultConfig({
         },
     ],
     chains: [
-        arbitrum, // Default for Hyperliquid
+        arbitrum,
         mainnet,
         base
     ],
@@ -61,24 +61,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
     React.useEffect(() => {
         setMounted(true);
-
-        // Suppress WalletConnect origin allowlist error in development
-        // This error occurs when localhost isn't added to the WalletConnect project allowlist
-        if (process.env.NODE_ENV === 'development') {
-            const originalConsoleError = console.error;
-            console.error = (...args: unknown[]) => {
-                const message = args[0];
-                if (
-                    typeof message === 'string' &&
-                    message.includes('Origin') &&
-                    message.includes('not found on Allowlist')
-                ) {
-                    // Suppress this specific WalletConnect error in dev
-                    return;
-                }
-                originalConsoleError.apply(console, args);
-            };
-        }
     }, []);
 
     return (
@@ -87,7 +69,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
                 <RainbowKitProvider theme={darkTheme()} coolMode>
                     <ThemeProvider>
                         <TerminalSettingsProvider>
-                            {mounted && children}
+                            {mounted ? children : null}
                         </TerminalSettingsProvider>
                     </ThemeProvider>
                 </RainbowKitProvider>

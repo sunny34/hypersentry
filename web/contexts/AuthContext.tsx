@@ -96,6 +96,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 headers: { Authorization: `Bearer ${authToken}` }
             });
             setUser(response.data);
+            
+            // Set alpha context for existing session
+            try {
+                await axios.post(`${API_URL}/auth/alpha-context`, {}, {
+                    headers: { Authorization: `Bearer ${authToken}` }
+                });
+                console.log('Alpha context set for user');
+            } catch (ctxError) {
+                console.warn('Failed to set alpha context:', ctxError);
+            }
         } catch (error) {
             if (axios.isAxiosError(error)) {
                 if (error.response?.status === 401) {
@@ -154,6 +164,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             persistToken(newToken);
             setToken(newToken);
             setUser(newUser);
+
+            // Set alpha engine user context after successful login
+            try {
+                await axios.post(`${API_URL}/auth/alpha-context`, {}, {
+                    headers: { Authorization: `Bearer ${newToken}` }
+                });
+                console.log('Alpha context set for user');
+            } catch (ctxError) {
+                console.warn('Failed to set alpha context:', ctxError);
+            }
         } catch (error) {
             console.error('Wallet login failed:', error);
         } finally {
@@ -196,6 +216,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             persistToken(newToken);
             setToken(newToken);
             setUser(newUser);
+
+            // Set alpha engine user context after successful OAuth login
+            try {
+                await axios.post(`${API_URL}/auth/alpha-context`, {}, {
+                    headers: { Authorization: `Bearer ${newToken}` }
+                });
+                console.log('Alpha context set for user');
+            } catch (ctxError) {
+                console.warn('Failed to set alpha context:', ctxError);
+            }
         } catch (error) {
             console.error('Callback failed:', error);
             throw error;

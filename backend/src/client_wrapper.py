@@ -120,6 +120,12 @@ class HyperliquidClient:
         Get the current state of a user (positions, margin, etc.)
         """
         key = str(address or "").lower()
+
+        # Skip API calls for placeholder addresses
+        if self._is_placeholder_value(address):
+            logger.warning(f"Skipping user state fetch for placeholder address: {address}")
+            return None
+
         now = time.time()
         cached = self._user_state_cache.get(key)
 
@@ -147,6 +153,11 @@ class HyperliquidClient:
         """
         Get open orders for a user.
         """
+        # Skip API calls for placeholder addresses
+        if self._is_placeholder_value(address):
+            logger.warning(f"Skipping open orders fetch for placeholder address: {address}")
+            return None
+
         try:
             return self.info.open_orders(address)
         except Exception as e:

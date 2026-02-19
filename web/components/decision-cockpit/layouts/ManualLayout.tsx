@@ -4,6 +4,7 @@ import OpportunityTable from '../OpportunityTable';
 import ConvictionPanel from '../ConvictionPanel';
 import SignalBreakdown from '../widgets/SignalBreakdown';
 import ExecutionMonitor from '../widgets/ExecutionMonitor';
+import SimpleSignalPanel from '../widgets/SimpleSignalPanel';
 import { useAlphaStore } from '../../../store/useAlphaStore';
 
 const ManualLayout = () => {
@@ -38,9 +39,15 @@ const ManualLayout = () => {
                 </div>
             </div>
 
-            {/* Right: Analytics */}
+            {/* Right: Analytics + Simplified Signals */}
             <div className="lg:col-span-3 flex flex-col min-h-[280px]">
-                <div className="min-h-[220px] lg:min-h-0">
+                {/* Simplified Signal Panel */}
+                <div className="h-[300px] border-b border-gray-800">
+                    <SimpleSignalPanel />
+                </div>
+                
+                {/* Signal Breakdown */}
+                <div className="min-h-[180px] lg:min-h-0">
                     <SignalBreakdown />
                 </div>
                 <div className="flex-1 bg-gray-950/20 p-4 sm:p-6 flex flex-col justify-center text-gray-700 text-[10px] font-mono uppercase">

@@ -80,6 +80,13 @@ export const useWebSocket = (url: string, onMessage?: (data: unknown) => void) =
             socket.onopen = () => {
                 setIsConnected(true);
                 if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+                // If URL has token param, send auth + subscribe_private
+                if (targetUrl.includes('token=')) {
+                    const token = new URL(targetUrl).searchParams.get('token');
+                    if (token) {
+                        socket.send(JSON.stringify({ type: 'auth', token }));
+                    }
+                }
             };
 
             socket.onclose = (event) => {

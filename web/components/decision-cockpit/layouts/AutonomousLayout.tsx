@@ -5,6 +5,7 @@ import ExecutionMonitor from '../widgets/ExecutionMonitor';
 import ModelHealthWidget from '../widgets/ModelHealthWidget';
 import KillSwitch from '../widgets/KillSwitch';
 import AuthControlPanel from '../widgets/AuthControlPanel';
+import SimpleSignalPanel from '../widgets/SimpleSignalPanel';
 import { useAlphaStore } from '../../../store/useAlphaStore';
 
 const AutonomousLayout = () => {
@@ -26,7 +27,7 @@ const AutonomousLayout = () => {
 
     return (
         <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-0 overflow-y-auto lg:overflow-hidden">
-            {/* Left: System Governance */}
+            {/* Left: System Governance + Signals */}
             <div className="lg:col-span-3 border-b lg:border-b-0 lg:border-r border-gray-800 flex flex-col bg-gray-950/20 min-h-[320px]">
                 <div className="h-10 bg-gray-950 px-4 flex items-center border-b border-gray-800 text-xs font-bold text-gray-400 uppercase tracking-widest">
                     Governance :: Health
@@ -64,13 +65,21 @@ const AutonomousLayout = () => {
                 </div>
             </div>
 
-            {/* Center: Portfolio & Risk (Dominant) */}
+            {/* Center: Portfolio & Signals */}
             <div className="lg:col-span-9 flex flex-col bg-black min-h-[420px]">
-                <div className="flex-1 p-4 sm:p-6 lg:p-8 grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8">
-                    <div className="border border-gray-800 bg-gray-900/10 p-2 overflow-hidden shadow-2xl">
+                <div className="flex-1 p-4 sm:p-6 lg:p-8 grid grid-cols-1 xl:grid-cols-3 gap-6 lg:gap-8">
+                    {/* Simplified Signal Panel - NEW */}
+                    <div className="xl:col-span-1 border border-gray-800 bg-gray-900/10 p-2 overflow-hidden">
+                        <SimpleSignalPanel />
+                    </div>
+                    
+                    {/* Portfolio Risk */}
+                    <div className="xl:col-span-1 border border-gray-800 bg-gray-900/10 p-2 overflow-hidden">
                         <PortfolioRiskPanel />
                     </div>
-                    <div className="flex flex-col space-y-8">
+                    
+                    {/* Stats Column */}
+                    <div className="xl:col-span-1 flex flex-col space-y-6">
                         {/* High level performance / risk metrics for autonomous */}
                         <div className="grid grid-cols-2 gap-4 h-32">
                             <div className="bg-gray-950 border border-gray-800 rounded flex flex-col items-center justify-center">

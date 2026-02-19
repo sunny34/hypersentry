@@ -1,5 +1,6 @@
 import time
 import asyncio
+import json
 import logging
 import statistics
 import os
@@ -28,6 +29,28 @@ from config import config
 from src.services.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
+
+# Redis client for cross-worker user context sharing
+_redis_client = None
+
+def _get_redis_client():
+    """Get or create Redis client for user context storage."""
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    try:
+        import redis
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        _redis_client = redis.from_url(redis_url, decode_responses=True)
+        _redis_client.ping()
+        logger.info("Redis connected for user context sharing")
+    except Exception as e:
+        logger.warning(f"Redis unavailable for user context: {e}")
+        _redis_client = None
+    return _redis_client
+
+# Redis key prefix for user context
+_USER_CONTEXT_KEY = "alpha:user_context"
 # Backward-compatibility seam for legacy tests/integrations that patch ws_manager.
 # Runtime fanout is handled by event_bus + event_relay, so this remains optional.
 ws_manager = None
@@ -57,6 +80,230 @@ class AlphaService:
         self._equity_refresh_ms = max(1000, int(os.getenv("RISK_EQUITY_REFRESH_MS", "15000")))
         self._equity_stale_grace_ms = max(self._equity_refresh_ms, int(os.getenv("RISK_EQUITY_STALE_GRACE_MS", "300000")))
         self._last_equity_log_ms = 0
+        self._active_user_id: Optional[str] = None
+        self._active_user_address: Optional[str] = None
+        self._equity_last_fetch_ms = 0
+
+    def set_user_context(self, user_id: str, wallet_address: str):
+        """Set user context for personalized risk settings (stores in Redis for cross-worker access)."""
+        # Store in instance for fast access
+        self._active_user_id = user_id
+        self._active_user_address = wallet_address.lower()
+
+        # Also store in Redis for cross-worker sharing
+        redis = _get_redis_client()
+        if redis:
+            try:
+                context_data = json.dumps({
+                    "user_id": user_id,
+                    "wallet_address": wallet_address.lower()
+                })
+                redis.set(f"{_USER_CONTEXT_KEY}:current", context_data, ex=3600)  # 1 hour expiry
+                logger.info(f"User context stored in Redis: user_id={user_id}")
+            except Exception as e:
+                logger.warning(f"Failed to store user context in Redis: {e}")
+
+        logger.info(f"User context set: user_id={user_id}, address={wallet_address[:10]}...")
+
+    def initialize_system_identity(self):
+        """
+        Initialize the system/bot identity for autonomous trading.
+        Called once at startup. Resolves the bot's user ID from HL_ACCOUNT_ADDRESS.
+        """
+        try:
+            hl_address = os.getenv("HL_ACCOUNT_ADDRESS")
+            if not hl_address:
+                logger.warning("Initialize System Identity: No HL_ACCOUNT_ADDRESS found in env.")
+                return
+            
+            # Clean the address (remove quotes, whitespace, lowercase)
+            hl_address = hl_address.strip().strip("'").strip('"').lower()
+
+            # Use local import to avoid circular dependency
+            from database import get_session_factory
+            from models import Wallet
+            
+            # Create a short-lived DB session
+            SessionLocal = get_session_factory()
+            db = SessionLocal()
+            try:
+                wallet = db.query(Wallet).filter(Wallet.address == hl_address.lower()).first()
+                if wallet and wallet.user_id:
+                    logger.info(f"🤖 System Identity Initialized: Wallet {hl_address[:8]}... linked to User ID: {wallet.user_id}")
+                    self.set_user_context(str(wallet.user_id), wallet.address)
+                    
+                    # Pre-load risk settings
+                    try:
+                        from src.alpha_engine.risk.risk_service import risk_service
+                        risk_service.load_user_settings(str(wallet.user_id), db)
+                        logger.info(f"✅ Risk settings loaded for System User {wallet.user_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load risk settings for System User: {e}")
+                else:
+                    logger.warning(f"⚠️ System Identity: Wallet {hl_address} not found in DB or has no User ID. Auto-trading may be limited to defaults.")
+                    # We still set the address so _resolve_equity_address works
+                    self._active_user_address = hl_address.lower()
+                
+                # Subscribe to User Balance WebSocket (Push updates)
+                # Ensure we subscribe even if no user_id (using address is enough for cache)
+                try:
+                    from src.services.user_balance_service import user_balance_ws
+                    u_id = str(wallet.user_id) if wallet and wallet.user_id else None
+                    addr = wallet.address if wallet else hl_address.lower()
+                    asyncio.create_task(user_balance_ws.subscribe_user(addr, u_id))
+                    logger.info(f"✅ Subscribed System Bot to User Balance WS")
+                except Exception as e:
+                    logger.warning(f"Failed to subscribe bot to Balance WS: {e}")
+
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize System Identity: {e}")
+
+    def get_active_user_context(self) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Get active user context, checking Redis first for cross-worker access.
+        Returns (user_id, wallet_address).
+        """
+        # First check instance variables
+        if self._active_user_id:
+            return self._active_user_id, self._active_user_address
+
+        # Fall back to Redis for cross-worker access
+        redis = _get_redis_client()
+        if redis:
+            try:
+                data = redis.get(f"{_USER_CONTEXT_KEY}:current")
+                if data:
+                    ctx = json.loads(data)
+                    # Update instance cache for future calls
+                    self._active_user_id = ctx.get("user_id")
+                    self._active_user_address = ctx.get("wallet_address")
+                    logger.info(f"User context loaded from Redis: user_id={self._active_user_id}")
+                    return self._active_user_id, self._active_user_address
+            except Exception as e:
+                logger.warning(f"Failed to load user context from Redis: {e}")
+
+        return None, None
+
+    def clear_user_context(self):
+        """Clear user context on logout."""
+        if self._active_user_id:
+            from src.alpha_engine.risk.risk_service import risk_service
+            risk_service.clear_user_settings(self._active_user_id)
+        self._active_user_id = None
+        self._active_user_address = None
+
+    async def _check_and_execute_auto_trade(
+        self,
+        symbol: str,
+        direction: str,
+        size_usd: float,
+        confidence: float,
+    ) -> bool:
+        """
+        Check if auto_mode is enabled and execute trade if conditions are met.
+        Returns True if trade was executed, False otherwise.
+        """
+        logger.info(f"Auto-trade check: symbol={symbol}, direction={direction}, size_usd={size_usd}, confidence={confidence}")
+        
+        # Debug logging
+        # print(f"=== AUTO-CHECK: self_id={id(self)}, user_id={self._active_user_id} ===", flush=True)
+        
+        # 1. Determine Identity & Permissions
+        user_id = self._active_user_id
+        
+        # If no user context, check for global system override
+        if not user_id:
+            allow_system_trade = os.getenv("ENABLE_SERVER_SIDE_TRADING", "false").lower() == "true"
+            if not allow_system_trade:
+                 logger.debug(f"Auto-trade skipped: No user context and ENABLE_SERVER_SIDE_TRADING=false")
+                 return False
+            # Proceed as "System" (None user_id)
+        
+        # 2. Check Settings (User Specific or Global Defaults)
+        auto_enabled = False
+        
+        if user_id:
+             # Check user specific settings
+             from src.alpha_engine.risk.risk_service import risk_service
+             user_settings = risk_service.get_user_settings(user_id)
+             if user_settings and user_settings.get("auto_mode_enabled"):
+                 auto_enabled = True
+             else:
+                 logger.debug(f"Auto-trade skipped: User {user_id} has auto_mode_enabled=False")
+        else:
+             # Check global fallback (RiskService defaults don't have auto_mode, so check Env)
+             # This is dangerous, so we default to False unless explicitly set
+             auto_enabled = os.getenv("RISK_AUTO_MODE_ENABLED", "false").lower() == "true"
+             
+        if not auto_enabled:
+            return False
+        
+        # Minimum conviction score threshold for auto-trading (65/100)
+        # NOTE: `confidence` here is conviction.score (0-100), NOT conviction.confidence (0-1)
+        min_conviction_score = 65
+        if confidence < min_conviction_score:
+            logger.info(f"Auto-trade skipped for {symbol}: conviction_score {confidence:.0f}/100 < {min_conviction_score}")
+            return False
+        
+        # Minimum size threshold ($5)
+        min_size = 5.0
+        if size_usd < min_size:
+            logger.info(f"Auto-trade skipped for {symbol}: size ${size_usd:.2f} < ${min_size}")
+            return False
+        
+        # Execute the trade
+        try:
+            from src.manager import TraderManager
+            trader = TraderManager()
+            hl_client = getattr(trader, "hl_client", None)
+            
+            if not hl_client:
+                logger.warning(f"Auto-trade failed for {symbol}: no Hyperliquid client")
+                return False
+            
+            # Get current price
+            from src.alpha_engine.state.global_state import global_state_store
+            state = await global_state_store.get_state(symbol)
+            if not state or not state.price:
+                logger.warning(f"Auto-trade failed for {symbol}: no price data")
+                return False
+            
+            current_price = state.price
+            is_buy = direction.upper() == "BUY" or direction.upper() == "LONG"
+            
+            # Calculate size in base currency
+            size_base = size_usd / current_price
+            
+            # Place the order
+            result = hl_client.market_open(
+                coin=symbol,
+                is_buy=is_buy,
+                sz=size_base,
+                slippage=0.05,
+            )
+            
+            if result:
+                logger.info(f"🤖 AUTO-TRADE EXECUTED: {direction.upper()} {size_base:.4f} {symbol} @ ${current_price}")
+                
+                # Send notification
+                try:
+                    from src.notifications import TelegramBot
+                    notifier = TelegramBot()
+                    await notifier.send_order_alert(symbol, size_base, direction.upper(), current_price)
+                except:
+                    pass
+                
+                return True
+            else:
+                logger.warning(f"Auto-trade failed for {symbol}: order returned no result")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Auto-trade error for {symbol}: {e}")
+            return False
 
     @staticmethod
     def _safe_float(value: object, default: float = 0.0) -> float:
@@ -72,8 +319,11 @@ class AlphaService:
             return addr
         return f"{addr[:6]}...{addr[-4:]}"
 
-    @staticmethod
-    def _resolve_equity_address() -> Optional[str]:
+    def _resolve_equity_address(self) -> Optional[str]:
+        # First priority: active user context (from authenticated session)
+        if self._active_user_address:
+            return self._active_user_address
+        # Fallback: env var configured address
         candidates = [
             os.getenv("RISK_ACCOUNT_ADDRESS"),
             os.getenv("ALPHA_RISK_ACCOUNT_ADDRESS"),
@@ -90,9 +340,26 @@ class AlphaService:
         return None
 
     async def _fetch_hl_account_equity(self, address: str) -> Optional[float]:
+        # 1. First tried: In-memory Push Cache (WebSocket)
         try:
-            from src.manager import manager as trader_manager
-            hl_client = getattr(trader_manager, "hl_client", None)
+             from src.services.user_balance_service import user_balance_store
+             cached_bal = user_balance_store.get_balance(address)
+             # If we have fresh data (e.g. updated in last 60s), use it
+             if cached_bal:
+                 ts = cached_bal.get("updated_at", 0)
+                 if time.time() - ts < 60:
+                     equity = cached_bal.get("total_equity", 0.0)
+                     if equity > 0:
+                         # logger.debug(f"Used WS Cache for equity: {equity}")
+                         return equity
+        except Exception:
+             pass
+
+        # 2. Fallback: REST Polling (Rate Limited by caller)
+        try:
+            from src.manager import TraderManager
+            trader = TraderManager()
+            hl_client = getattr(trader, "hl_client", None)
             if not hl_client:
                 return None
             state = await asyncio.to_thread(hl_client.get_user_state, address)
@@ -117,18 +384,33 @@ class AlphaService:
                 return equity
         return None
 
+    
     async def get_current_equity(self) -> float:
         now_ms = int(time.time() * 1000)
         fallback = max(float(getattr(risk_service, "fallback_equity", 100000.0)), 1000.0)
 
+        # 1. Return valid cache if within refresh window
         if (now_ms - self._equity_cache_ms) <= self._equity_refresh_ms and self._equity_cache_usd > 0:
             return self._equity_cache_usd
+
+        # 2. Rate limit check: Don't fetch if we tried recently (even if it failed)
+        # Initialize _equity_last_fetch_ms if not present
+        if not hasattr(self, "_equity_last_fetch_ms"):
+            self._equity_last_fetch_ms = 0
+            
+        if (now_ms - self._equity_last_fetch_ms) < 5000:  # Minimum 5s between API calls (hard limit)
+            if self._equity_cache_usd > 0:
+                return self._equity_cache_usd
+            return fallback
 
         address = self._resolve_equity_address()
         if not address:
             return fallback
 
+        # 3. Fetch from API
+        self._equity_last_fetch_ms = now_ms
         equity = await self._fetch_hl_account_equity(address)
+        
         if equity and equity > 0:
             self._equity_cache_usd = equity
             self._equity_cache_ms = now_ms
@@ -142,7 +424,9 @@ class AlphaService:
                 )
             return equity
 
-        if self._equity_cache_usd > 0 and (now_ms - self._equity_cache_ms) <= self._equity_stale_grace_ms:
+        # 4. Fallback if fetch failed
+        if self._equity_cache_usd > 0:
+            # Return stale cache if available
             return self._equity_cache_usd
 
         if now_ms - self._last_equity_log_ms > 60_000:
@@ -156,6 +440,20 @@ class AlphaService:
         """
         symbol = symbol.upper()
         enriched = dict(data)
+        
+        # Handle liquidation events - pass directly, state store will accumulate in its own cache
+        if "liquidation_event" in data:
+            liq_event = data["liquidation_event"]
+            if hasattr(liq_event, 'price'):
+                # It's a LiquidationLevel object, pass as liquidation_levels
+                enriched["liquidation_levels"] = [liq_event]
+                logger.info(f"=== LIQUIDATION EVENT: {symbol} price={liq_event.price} side={liq_event.side} ===")
+            else:
+                logger.warning(f"=== LIQUIDATION BAD: {symbol} type={type(liq_event)} ===")
+        
+        if "orderbook_bids" in data:
+            logger.info(f"=== ORDERBOOK: {symbol} bids={len(data.get('orderbook_bids', []))} asks={len(data.get('orderbook_asks', []))} ===")
+        
         enriched.update(self._build_trade_derived_updates(symbol, data))
         enriched.update(self._build_oi_derived_updates(symbol, enriched))
 
@@ -513,6 +811,7 @@ class AlphaService:
                 if len(self.funding_history_cache.get(symbol, [])) > 1
                 else 0.00001,
             ),
+            price_history=p_hist,
         )
         
         # --- C. Probability & Governance ---
@@ -528,6 +827,17 @@ class AlphaService:
         risk_data = None
         exec_plan = None
         
+        # Extract dynamic R:R hint from conviction explanations
+        dynamic_rr = 2.0
+        for expl in conviction.explanation:
+            if "Dynamic R:R target:" in expl:
+                try:
+                    rr_str = expl.split("Dynamic R:R target:")[1].split(":")[0].strip()
+                    dynamic_rr = float(rr_str)
+                except (ValueError, IndexError):
+                    pass
+                break
+
         if conviction.bias != "NEUTRAL":
             direction = conviction.bias
             # Map LONG/SHORT to BUY/SELL for execution_service
@@ -538,16 +848,18 @@ class AlphaService:
             current_equity = await self.get_current_equity()
             current_regime = gov_report.active_regime if isinstance(gov_report.active_regime, str) else "NORMAL_MARKET"
             
+            logger.info(f"=== RISK CALC: symbol={symbol}, direction={direction}, price={state.price}, equity={current_equity}, rr={dynamic_rr} ===")
             risk_data = risk_service.calculate_risk(
                 symbol=symbol,
                 direction=direction, # risk_service accepts LONG/SHORT
                 win_prob=probs.prob_up_1pct if direction == "LONG" else probs.prob_down_1pct,
-                reward_risk_ratio=2.0, # Target 2:1
+                reward_risk_ratio=dynamic_rr,  # Dynamic R:R from conviction engine
                 realized_vol_pct=history_vol,
                 current_equity=current_equity,
                 current_regime=current_regime,
                 current_price=state.price,
-                active_correlations=0.0
+                active_correlations=0.0,
+                user_id=self._active_user_id
             )
             logger.info(
                 "risk_sizing symbol=%s dir=%s equity=%.2f size_usd=%.2f risk_pct=%.4f max_pos_cap=%.2f max_lev=%.2f",
@@ -574,6 +886,17 @@ class AlphaService:
                 probability_decay_per_min=max(0.0, vol_res.get("realized_vol", history_vol) * 0.5),
                 recent_sweep_detected=footprint_res.sweep.event is not None,
             )
+            
+            # Auto-execute trade if autonomous mode is enabled
+            logger.info(f"=== AUTO-EXEC CHECK: symbol={symbol}, bias={conviction.bias}, exec_plan={bool(exec_plan)}, risk_data={bool(risk_data)}, user_id={self._active_user_id} ===")
+            if exec_plan and risk_data:
+                result = await self._check_and_execute_auto_trade(
+                    symbol=symbol,
+                    direction=exec_direction,
+                    size_usd=float(risk_data.size_usd),
+                    confidence=conviction.score,  # 0-100 score, checked against >= 65
+                )
+                logger.info(f"=== AUTO-EXEC RESULT: {symbol} => {result} ===")
 
         # --- E. Broadcast to Frontend ---
 
@@ -591,6 +914,7 @@ class AlphaService:
                 "prob_up_1pct": probs.prob_up_1pct,
                 "prob_down_1pct": probs.prob_down_1pct,
                 "realized_vol": vol_res.get("realized_vol", 0.02),
+                "explanation": conviction.explanation[:5] if conviction.explanation else [],
                 "timestamp": conviction.timestamp,
             },
         )
@@ -636,6 +960,8 @@ class AlphaService:
                     ),
                     "equity_used": current_equity if conviction.bias != "NEUTRAL" else 0.0,
                     "max_position_cap_usd": float(getattr(risk_service, "max_position_usd", 0.0)),
+                    "stop_loss_price": float(getattr(risk_data, "stop_loss_price", 0.0)),
+                    "take_profit_price": float(getattr(risk_data, "take_profit_price", 0.0)),
                     "timestamp": int(getattr(risk_data, "timestamp", int(time.time()))),
                 },
             )

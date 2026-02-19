@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 import os
 from sqlalchemy.orm import Session
-from models import User, ActiveTrade
+from models import User, ActiveTrade, Wallet
 from database import get_db
 from auth import require_user
 from schemas import ArbExecutionRequest, CandlesRequest, AnalyzeRequest, OrderRequest
@@ -1551,3 +1551,62 @@ async def get_whale_stats(request: Request):
         return {"error": "Whale tracker not initialized"}
     
     return tracker.get_stats()
+
+
+# ============================================================
+# Account Balance Endpoint for Settings
+# ============================================================
+
+@router.get("/balance")
+async def get_balance(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get authenticated user's account balance for trading settings.
+    Uses real-time data from Hyperliquid WebSocket when available.
+    """
+    try:
+        # Get the user's wallet address
+        wallet = db.query(Wallet).filter(Wallet.user_id == user.id).first()
+        if not wallet:
+            return {"error": "No wallet connected", "total_equity": 0}
+        
+        # Try to get real-time balance from the service
+        try:
+            from src.services.user_balance_service import user_balance_store, fetch_user_balance
+            
+            # First check if we have a cached real-time balance
+            cached = user_balance_store.get_balance(wallet.address)
+            if cached:
+                # Return cached balance (real-time if WS is connected)
+                return {
+                    "total_equity": cached.get("total_equity", 0),
+                    "available_balance": cached.get("available_balance", 0),
+                    "wallet_address": wallet.address,
+                    "currency": cached.get("currency", "USDC"),
+                    "realtime": True
+                }
+            
+            # Fallback: fetch fresh balance
+            balance = await fetch_user_balance(wallet.address)
+            if balance.get("error"):
+                return {"error": balance.get("error"), "total_equity": 0}
+            
+            return {
+                "total_equity": balance.get("total_equity", 0),
+                "available_balance": balance.get("available_balance", 0),
+                "wallet_address": wallet.address,
+                "currency": balance.get("currency", "USDC"),
+                "realtime": False
+            }
+        except Exception as e:
+            logger.warning(f"Could not fetch HL equity: {e}")
+            return {
+                "total_equity": 0,
+                "wallet_address": wallet.address,
+                "error": str(e)
+            }
+    except Exception as e:
+        logger.error(f"Error getting balance: {e}")
+        return {"error": str(e), "total_equity": 0}

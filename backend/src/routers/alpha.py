@@ -226,14 +226,47 @@ async def get_liquidation_projection(symbol: str):
     """
     Calculates the potential liquidation cascade impact if price moves up or down.
     Crucial for identifying short squeeze or long liquidation overflow zones.
+    Uses ONLY real exchange liquidation data (Hyperliquid, Binance, Bybit, OKX via cryptofeed).
     """
-    projection = await liquidation_service.get_projection(symbol.upper())
+    symbol_upper = symbol.upper()
+    projection = await liquidation_service.get_projection(symbol_upper)
+
     if not projection:
         raise HTTPException(
             status_code=404,
-            detail=f"Liquidation data for {symbol} unavailable."
+            detail=f"No real liquidation data for {symbol} yet. Data arrives as liquidations occur on exchanges."
         )
     return projection
+
+
+@router.get("/liquidation/{symbol}/stats")
+async def get_liquidation_stats(symbol: str):
+    """
+    Returns stats about the liquidation data feeds and current data quality.
+    """
+    symbol_upper = symbol.upper()
+    state = await global_state_store.get_state(symbol_upper)
+
+    # Get cryptofeed service stats
+    try:
+        from src.services.cryptofeed_liquidation_service import cryptofeed_liquidation_service
+        cf_stats = cryptofeed_liquidation_service.get_stats()
+    except Exception:
+        cf_stats = {"error": "cryptofeed service not available"}
+
+    levels = (state.liquidation_levels or []) if state else []
+    exchanges_in_data = set()
+    for l in levels:
+        exchanges_in_data.add(getattr(l, 'exchange', 'unknown'))
+
+    return {
+        "symbol": symbol_upper,
+        "level_count": len(levels),
+        "exchanges_in_data": sorted(exchanges_in_data),
+        "cryptofeed_stats": cf_stats,
+        "data_source": "real_exchange_events",
+        "note": "Liquidation data comes from real exchange events only. Data accumulates as liquidations occur.",
+    }
 
 @router.post("/validate/{symbol}", response_model=WalkForwardReport)
 async def run_alpha_validation(symbol: str, csv_path: str = "history.csv"):
@@ -327,6 +360,88 @@ async def generate_execution_plan(symbol: str):
         recent_sweep_detected=recent_sweep_detected,
     )
 
+@router.get("/orderbook/{symbol}")
+async def get_orderbook_levels(symbol: str):
+    """
+    Returns orderbook levels for a symbol.
+    """
+    symbol = symbol.upper()
+    state = await global_state_store.get_state(symbol)
+    if not state:
+        raise HTTPException(status_code=404, detail="Symbol not tracked")
+    
+    return {
+        "symbol": symbol,
+        "imbalance": state.orderbook_imbalance,
+        "bids": [
+            {"price": p, "size": s} 
+            for p, s in (state.orderbook_bids or [])[:15]
+        ],
+        "asks": [
+            {"price": p, "size": s} 
+            for p, s in (state.orderbook_asks or [])[:15]
+        ],
+    }
+
+@router.get("/liquidations/{symbol}")
+async def get_liquidation_levels(symbol: str):
+    """
+    Returns liquidation levels for a symbol.
+    """
+    symbol = symbol.upper()
+    state = await global_state_store.get_state(symbol)
+    if not state:
+        raise HTTPException(status_code=404, detail="Symbol not tracked")
+    
+    levels = state.liquidation_levels or []
+    return {
+        "symbol": symbol,
+        "count": len(levels),
+        "levels": [
+            {
+                "price": l.price,
+                "notional": l.notional,
+                "side": l.side,
+            }
+            for l in levels[-20:]  # Last 20 levels
+        ]
+    }
+
+@router.get("/state/{symbol}")
+async def get_alpha_state(symbol: str):
+    """
+    Returns raw market state data - use to verify what's populated.
+    """
+    symbol = symbol.upper()
+    state = await global_state_store.get_state(symbol)
+    if not state:
+        raise HTTPException(status_code=404, detail="Symbol not tracked")
+    
+    # Return key fields
+    return {
+        "symbol": state.symbol,
+        "price": state.price,
+        "mark_price": state.mark_price,
+        "funding_rate": state.funding_rate,
+        "open_interest": state.open_interest,
+        "open_interest_hl": state.open_interest_hl,
+        "cvd_1m": state.cvd_1m,
+        "cvd_hl_1m": state.cvd_hl_1m,
+        "cvd_spot_composite_1m": state.cvd_spot_composite_1m,
+        "aggressive_buy_volume_1m": state.aggressive_buy_volume_1m,
+        "aggressive_sell_volume_1m": state.aggressive_sell_volume_1m,
+        "orderbook_imbalance": state.orderbook_imbalance,
+        "orderbook_bids_count": len(state.orderbook_bids or []),
+        "orderbook_asks_count": len(state.orderbook_asks or []),
+        "trade_stream_count": len(state.trade_stream_recent or []),
+        "liquidation_levels_count": len(state.liquidation_levels or []),
+        "liquidation_levels_sample": [
+            {"price": l.price, "side": l.side, "notional": l.notional, "exchange": l.exchange}
+            for l in (state.liquidation_levels or [])[:5]
+        ],
+        "timestamp": state.timestamp,
+    }
+
 @router.get("/debug/{symbol}")
 async def get_alpha_debug(symbol: str):
     """
@@ -352,3 +467,116 @@ async def get_alpha_debug(symbol: str):
         "governance": gov_service.get_health_report().model_dump() if gov_service else None,
         "probabilities": probs.model_dump() if probs else None
     }
+
+
+# ============================================================
+# SIMPLIFIED ALPHA ENDPOINTS
+# ============================================================
+
+from src.alpha_engine.models.simplified_models import SimplifiedSignal, SignalStrength
+from src.alpha_engine.services.simplified_alpha_service import simplified_alpha_service
+
+@router.get("/simplified/{symbol}", response_model=SimplifiedSignal)
+async def get_simplified_signal(symbol: str):
+    """
+    Returns a simplified, actionable trading signal.
+    
+    - BUY/SELL/WAIT signal
+    - Entry price, stop loss, target
+    - Risk:Reward ratio
+    - Confidence level
+    
+    Use this for systematic/automated trading.
+    """
+    signal = await simplified_alpha_service.generate_signal(symbol.upper())
+    if not signal:
+        raise HTTPException(status_code=404, detail=f"Unable to generate signal for {symbol}")
+    return signal
+
+
+@router.get("/simplified/{symbol}/history", response_model=SignalStrength)
+async def get_signal_history(symbol: str):
+    """
+    Returns historical signal statistics for a symbol.
+    """
+    return simplified_alpha_service.get_signal_history(symbol.upper())
+
+
+@router.get("/simplified/batch")
+async def get_batch_simplified_signals(symbols: str = "BTC,ETH,SOL"):
+    """
+    Returns simplified signals for multiple symbols.
+    Example: /alpha/simplified/batch?symbols=BTC,ETH,SOL
+    """
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    results = {}
+    
+    for symbol in symbol_list:
+        signal = await simplified_alpha_service.generate_signal(symbol)
+        if signal:
+            results[symbol] = signal
+    
+    return results
+
+
+# Batch endpoint for multiple symbols
+@router.get("/batch")
+async def get_batch_signals(symbols: str = "BTC,ETH,SOL"):
+    """
+    Returns conviction signals for multiple symbols.
+    Example: /alpha/batch?symbols=BTC,ETH,SOL
+    """
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    results = {}
+    
+    for symbol in symbol_list:
+        try:
+            # Get conviction for each symbol
+            conviction = await conviction_service.get_conviction(symbol)
+            if conviction:
+                results[symbol] = conviction.model_dump()
+        except Exception as e:
+            logger.warning(f"Failed to get conviction for {symbol}: {e}")
+            continue
+    
+    return results
+
+
+from pydantic import BaseModel as PydanticBase
+
+class AutonomousTriggerRequest(PydanticBase):
+    symbol: str
+    direction: str
+    conviction_score: int
+
+@router.post("/autonomous/trigger")
+async def autonomous_trigger(req: AutonomousTriggerRequest):
+    """
+    Frontend autonomous execution trigger.
+    Forces a pipeline run for the given symbol. The backend's
+    _check_and_execute_auto_trade handles actual execution with safety gates:
+    - auto_mode must be enabled in user risk settings
+    - conviction.score must be >= 65
+    - minimum size $5
+    - valid HyperLiquid client
+    """
+    symbol = req.symbol.upper()
+    logger.info(
+        "autonomous_trigger symbol=%s direction=%s score=%d",
+        symbol, req.direction, req.conviction_score,
+    )
+
+    # Force a pipeline run — this will invoke _check_and_execute_auto_trade internally
+    try:
+        await alpha_service._safe_run_pipeline(symbol)
+    except Exception as e:
+        logger.error(f"Autonomous trigger pipeline failed for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "status": "triggered",
+        "symbol": symbol,
+        "direction": req.direction,
+        "conviction_score": req.conviction_score,
+    }
+

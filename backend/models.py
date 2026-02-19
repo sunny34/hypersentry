@@ -245,3 +245,43 @@ class WalletLoginNonce(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     used = Column(Boolean, nullable=False, default=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class UserTradingSettings(Base):
+    """User trading configuration for autonomous mode"""
+    __tablename__ = "user_trading_settings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Position sizing
+    equity_usd = Column(Float, default=100000.0)  # User's account equity
+    max_position_usd = Column(Float, default=1000.0)  # Max $ per trade
+    max_risk_pct = Column(Float, default=0.02)  # 2% risk per trade
+    max_leverage = Column(Float, default=3.0)  # Max leverage
+    
+    # Target levels
+    target_profit_pct = Column(Float, default=0.03)  # 3% target profit
+    stop_loss_pct = Column(Float, default=0.01)  # 1% stop loss
+    
+    # Autonomous mode settings
+    auto_mode_enabled = Column(Boolean, default=False)
+    max_daily_trades = Column(Integer, default=5)
+    max_daily_loss_pct = Column(Float, default=0.05)  # 5% max daily loss
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "equity_usd": self.equity_usd,
+            "max_position_usd": self.max_position_usd,
+            "max_risk_pct": self.max_risk_pct,
+            "max_leverage": self.max_leverage,
+            "target_profit_pct": self.target_profit_pct,
+            "stop_loss_pct": self.stop_loss_pct,
+            "auto_mode_enabled": self.auto_mode_enabled,
+            "max_daily_trades": self.max_daily_trades,
+            "max_daily_loss_pct": self.max_daily_loss_pct,
+        }

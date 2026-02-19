@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 
-const SCORE_ALPHA = 0.25;
-const SCORE_DEADBAND = 1.0;
-const SCORE_FORCE_REFRESH_MS = 3000;
-const CONVICTION_DEADBAND = 0.03;
+const SCORE_ALPHA = 0.08; // Much slower smoothing (8% of new value)
+const SCORE_DEADBAND = 3.0; // Require 3% change before updating UI
+const SCORE_FORCE_REFRESH_MS = 10000; // Only force refresh after 10 seconds
+const CONVICTION_DEADBAND = 0.1; // Require bigger conviction change
 const PLAN_STALE_TTL_MS = 60_000;
 
 // Types derived from backend Pydantic models
@@ -21,6 +21,10 @@ export interface ConvictionData {
     prob_down_1pct: number;
     realized_vol: number;
     timestamp: number;
+    explanation?: string[];
+    // Stability tracking
+    bias_streak?: number; // How many consecutive readings on same side
+    last_bias_change?: number; // Timestamp of last bias change
 }
 
 export interface RiskData {
@@ -31,6 +35,8 @@ export interface RiskData {
     risk_percent_equity: number;
     equity_used?: number;
     max_position_cap_usd?: number;
+    stop_loss_price?: number;
+    take_profit_price?: number;
     breakdown: {
         edge_component: number;
         kelly_fraction: number;
@@ -78,49 +84,45 @@ export interface GovernanceReport {
     active_model_id: string;
     calibration_status: 'OPTIMAL' | 'DEGRADED' | 'STALE';
     feature_drift: Record<string, unknown>;
+    last_retrain_timestamp?: number;
+    regime_stability?: number;
 }
 
-export interface StreamState {
-    connected: boolean;
-    status: 'connecting' | 'live' | 'degraded' | 'stale' | 'disconnected';
-    lastConnectedAt: number | null;
-    lastMessageAt: number | null;
-    reconnectCount: number;
-    error: string | null;
-}
-
-interface AlphaStore {
-    // Map of symbol -> data
+export interface AlphaStore {
     convictions: Record<string, ConvictionData>;
     risks: Record<string, RiskData>;
     executionPlans: Record<string, ExecutionPlan>;
     governance: Record<string, GovernanceReport>;
     executionLogs: ExecutionLog[];
-    stream: StreamState;
-
-    // Global State
-    activeSymbol: string | null;
+    stream: {
+        connected: boolean;
+        status: 'connecting' | 'live' | 'degraded' | 'stale' | 'disconnected';
+        lastConnectedAt: number | null;
+        lastMessageAt: number | null;
+        reconnectCount: number;
+        error: string | null;
+    };
+    activeSymbol: string;
     autonomousMode: boolean;
-
-    // Actions
     setConviction: (symbol: string, data: ConvictionData) => void;
     setRisk: (symbol: string, data: RiskData) => void;
+    setGovernance: (symbol: string, data: GovernanceReport) => void;
     setExecutionPlan: (symbol: string, plan: ExecutionPlan) => void;
     pruneStaleExecutionPlans: () => void;
-    setGovernance: (symbol: string, report: GovernanceReport) => void;
-    setStreamState: (patch: Partial<StreamState>) => void;
-    addLog: (log: Omit<ExecutionLog, 'id' | 'timestamp'>) => void;
     setActiveSymbol: (symbol: string) => void;
-    toggleAutonomous: () => void;
+    setStreamState: (state: Partial<AlphaStore['stream']>) => void;
+    addLog: (log: Omit<ExecutionLog, 'id' | 'timestamp'>) => void;
+    clearLogs: () => void;
 }
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-
-const toFinite = (value: unknown, fallback: number) => {
-    const num = Number(value);
+const toFinite = (val: unknown, fallback: number): number => {
+    const num = Number(val);
     return Number.isFinite(num) ? num : fallback;
 };
 
+const clamp = (val: number, min: number, max: number): number => Math.max(min, Math.min(max, val));
+
+// Enhanced smoothing with stability check
 const smoothConviction = (prev: ConvictionData | undefined, incoming: ConvictionData): ConvictionData => {
     const now = Date.now();
     const rawScore = clamp(toFinite(incoming.score, prev?.score ?? 50), 0, 100);
@@ -133,13 +135,16 @@ const smoothConviction = (prev: ConvictionData | undefined, incoming: Conviction
             conviction_score: Number(rawConvictionScore.toFixed(3)),
             raw_score: rawScore,
             raw_conviction_score: rawConvictionScore,
-            ui_updated_at: now
+            ui_updated_at: now,
+            bias_streak: 0,
+            last_bias_change: now,
         };
     }
 
     const prevUiTs = prev.ui_updated_at ?? prev.timestamp ?? 0;
     const forceRefresh = now - prevUiTs >= SCORE_FORCE_REFRESH_MS;
 
+    // EMA smoothing
     const emaScore = prev.score + ((rawScore - prev.score) * SCORE_ALPHA);
     const scoreDelta = Math.abs(emaScore - prev.score);
     const nextScore = (scoreDelta >= SCORE_DEADBAND || forceRefresh)
@@ -152,13 +157,45 @@ const smoothConviction = (prev: ConvictionData | undefined, incoming: Conviction
         ? Number(emaConviction.toFixed(3))
         : prev.conviction_score;
 
+    // Determine bias with streak tracking
+    let nextBias: 'LONG' | 'SHORT' | 'NEUTRAL' = prev.bias;
+    let biasStreak = prev.bias_streak ?? 0;
+    const lastBiasChange = prev.last_bias_change ?? now;
+
+    // Calculate raw bias from score
+    const rawBias: 'LONG' | 'SHORT' | 'NEUTRAL' =
+        nextScore >= 55 ? 'LONG' :
+            nextScore <= 45 ? 'SHORT' : 'NEUTRAL';
+
+    // Only change bias if we have a sustained streak
+    if (rawBias === prev.bias) {
+        biasStreak += 1;
+    } else {
+        biasStreak = 1; // Reset streak
+    }
+
+    // Require at least 5 consecutive readings to change bias
+    if (biasStreak >= 5) {
+        nextBias = rawBias;
+        if (rawBias !== prev.bias) {
+            // Bias changed - log it
+            console.log(`[BIAS CHANGE] ${incoming.symbol}: ${prev.bias} -> ${nextBias} (streak: ${biasStreak})`);
+        }
+    } else {
+        // Not enough streak - keep previous bias
+        nextBias = prev.bias;
+    }
+
     return {
         ...incoming,
         score: clamp(nextScore, 0, 100),
         conviction_score: clamp(nextConviction, -1, 1),
         raw_score: rawScore,
         raw_conviction_score: rawConvictionScore,
-        ui_updated_at: now
+        ui_updated_at: now,
+        bias: nextBias,
+        bias_streak: biasStreak,
+        last_bias_change: nextBias !== prev.bias ? now : lastBiasChange,
     };
 };
 
@@ -200,6 +237,13 @@ export const useAlphaStore = create<AlphaStore>((set) => ({
         };
     }),
 
+    setGovernance: (symbol, data) => set((state) => {
+        const key = symbol.toUpperCase();
+        return {
+            governance: { ...state.governance, [key]: { ...data, symbol: key } }
+        };
+    }),
+
     setExecutionPlan: (symbol, plan) => set((state) => {
         const key = symbol.toUpperCase();
         const now = Date.now();
@@ -208,59 +252,40 @@ export const useAlphaStore = create<AlphaStore>((set) => ({
             symbol: key,
             timestamp: toFinite(plan.timestamp, now)
         };
-        const nextPlans: Record<string, ExecutionPlan> = {
-            ...state.executionPlans,
-            [key]: normalized
-        };
-        for (const [sym, candidate] of Object.entries(nextPlans)) {
-            const ts = toFinite(candidate.timestamp, 0);
-            if (ts > 0 && (now - ts) > PLAN_STALE_TTL_MS) {
-                delete nextPlans[sym];
-            }
-        }
+        const prevPlan = state.executionPlans[key];
+        const stale = prevPlan && (now - (prevPlan.timestamp ?? 0)) > PLAN_STALE_TTL_MS;
         return {
-            executionPlans: nextPlans
+            executionPlans: stale
+                ? state.executionPlans
+                : { ...state.executionPlans, [key]: normalized }
         };
     }),
 
     pruneStaleExecutionPlans: () => set((state) => {
         const now = Date.now();
-        let changed = false;
-        const nextPlans: Record<string, ExecutionPlan> = { ...state.executionPlans };
-        for (const [sym, candidate] of Object.entries(nextPlans)) {
-            const ts = toFinite(candidate.timestamp, 0);
-            if (ts > 0 && (now - ts) > PLAN_STALE_TTL_MS) {
-                delete nextPlans[sym];
-                changed = true;
-            }
-        }
-        if (!changed) return state;
-        return { executionPlans: nextPlans };
+        const pruned = Object.fromEntries(
+            Object.entries(state.executionPlans).filter(
+                ([_, plan]) => (now - ((plan).timestamp ?? 0)) <= PLAN_STALE_TTL_MS
+            )
+        );
+        return { executionPlans: pruned };
     }),
 
-    setGovernance: (symbol, report) => set((state) => {
-        const key = symbol.toUpperCase();
-        return {
-            governance: { ...state.governance, [key]: { ...report, symbol: key } }
-        };
-    }),
+    setActiveSymbol: (symbol) => set({ activeSymbol: symbol.toUpperCase() }),
 
-    setStreamState: (patch) => set((state) => ({
-        stream: { ...state.stream, ...patch }
+    setStreamState: (streamUpdate) => set((state) => ({
+        stream: { ...state.stream, ...streamUpdate }
     })),
 
     addLog: (log) => set((state) => {
         const newLog: ExecutionLog = {
             ...log,
-            id: Math.random().toString(36).substring(7),
+            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             timestamp: Date.now()
         };
-        return {
-            executionLogs: [newLog, ...state.executionLogs].slice(0, 50)
-        };
+        const logs = [newLog, ...state.executionLogs].slice(0, 500);
+        return { executionLogs: logs };
     }),
 
-    setActiveSymbol: (symbol) => set({ activeSymbol: symbol.toUpperCase() }),
-
-    toggleAutonomous: () => set((state) => ({ autonomousMode: !state.autonomousMode }))
+    clearLogs: () => set({ executionLogs: [] })
 }));

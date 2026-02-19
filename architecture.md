@@ -410,3 +410,201 @@ Keep current codebase as foundation, then extract services in order:
 3. Optional event bus and deeper storage
 
 This gives production safety and scale without losing current development speed.
+
+---
+
+## 20) Real Data Flow (As-Built, Feb 2026)
+
+```
+┌─────────────────── EXTERNAL DATA SOURCES ───────────────────┐
+│  Hyperliquid WS    Binance Futures    Bybit    OKX          │
+│  (orderbook,       (liquidations      (liq)    (liq)        │
+│   trades, OI,       via cryptofeed)                         │
+│   funding)                                                  │
+└────────────┬───────────────────┬────────────────────────────┘
+             │                   │
+    ┌────────▼────────┐  ┌──────▼────────────────┐
+    │   Aggregator    │  │ CryptofeedLiqService   │
+    │  (ws_loop,      │  │ (batched every 2s,     │
+    │   binance_ws,   │  │  push to state_store)  │
+    │   coinbase_ws)  │  └──────┬─────────────────┘
+    │                 │         │
+    │  Updates        │         │
+    │  state_store    │         │
+    └────────┬────────┘         │
+             │                  │
+    ┌────────▼──────────────────▼──────────────────┐
+    │            global_state_store                 │
+    │  (per-symbol: price, OI, funding, book,      │
+    │   trades, CVD, liquidation_levels)            │
+    └────────┬─────────────────────────────────────┘
+             │
+    ┌────────▼─────────────────────────────────┐
+    │         AlphaService._run_pipeline()      │
+    │                                           │
+    │  1. OIRegimeClassifier → regime signal    │
+    │  2. VolatilityDetector → vol regime       │
+    │  3. LiquidationProjector → liq signal     │
+    │  4. SweepDetector + AbsorptionDetector    │
+    │  5. FlowImbalanceProcessor                │
+    │  6. ImpulseDetector                       │
+    │  7. ConvictionEngine.analyze()            │
+    │     → weighted aggregate (5 components)   │
+    │     → time-decay                          │
+    │     → BTC cross-correlation (for alts)    │
+    │     → dynamic R:R hint                    │
+    │  8. ProbabilityService                    │
+    │  9. RiskService (Kelly + vol sizing)      │
+    │ 10. ExecutionService (slicing strategy)   │
+    └────────┬─────────────────────────────────┘
+             │
+    ┌────────▼─────────────────────────────────┐
+    │            event_bus.publish()             │
+    │  Events: alpha_conviction, gov_update,    │
+    │          risk_update, exec_plan,          │
+    │          agg_update                        │
+    └────────┬─────────────────────────────────┘
+             │
+    ┌────────▼─────────────────────────────────┐
+    │       event_relay (CRITICAL SERVICE)       │
+    │  Subscribes to event_bus, forwards        │
+    │  all events to ws_manager.broadcast()     │
+    │  MUST start before aggregator             │
+    └────────┬─────────────────────────────────┘
+             │
+    ┌────────▼─────────────────────────────────┐
+    │            ws_manager                      │
+    │  Sends JSON to all connected WebSocket    │
+    │  clients (frontend)                        │
+    └────────┬─────────────────────────────────┘
+             │
+    ┌────────▼─────────────────────────────────┐
+    │         Frontend WebSocket Handler         │
+    │                                           │
+    │  useAlphaStream (Decision Cockpit)        │
+    │    → useAlphaStore.setConviction()        │
+    │    → useAlphaStore.setRisk()              │
+    │    → useAlphaStore.setExecutionPlan()     │
+    │                                           │
+    │  useWebSocket (Trading Terminal)           │
+    │    → useMarketStore.updateFromAggregator()│
+    └──────────────────────────────────────────┘
+```
+
+### Startup Sequence (main.py lifespan) — actual order:
+
+```
+ 1. init_db()                     — PostgreSQL/SQLite
+ 2. TraderManager()               — Singleton
+ 3. aiohttp.ClientSession()       — Global HTTP
+ 4. BridgeMonitor → background    — Bridge alerts (tracked task)
+ 5. IntelEngine → background      — Intel signals (tracked task)
+ 6. UserBalanceWS → await start   — HL balance stream
+ 7. event_bus → await start       — In-process pub/sub
+ 8. CryptofeedLiqService → start  — Multi-exchange liquidations
+ 9. LiquidationEventListener      — Forwards liq → alpha
+10. event_relay → await start     — event_bus → WebSocket bridge ★CRITICAL
+11. Aggregator → background       — Market data + alpha pipeline (tracked task)
+12. WhaleTracker → background     — Whale monitoring (tracked task)
+13. AlphaService.initialize()     — System identity for auto-trade
+```
+
+> ⚠️ **Critical**: The `event_relay` MUST start before the aggregator.
+> Without it, no data reaches the frontend (event_bus publishes into void).
+
+## 21) Conviction Engine v2 Architecture (Feb 2026)
+
+### Component Weights
+
+| Component | Weight | Signal Source | Range | Notes |
+|---|---|---|---|---|
+| **Regime** | 35% | OI ∆ + Price ∆ classification | [-1, +1] | Strongest directional signal |
+| **Footprint** | 25% | Sweeps, absorption, flow imbalance, impulse | [-1, +1] | Order flow microstructure |
+| **Volatility** | 15% | Compression/expansion detection | **0** | Direction-neutral: amplifies other signals |
+| **Funding** | 15% | Funding rate z-score (contrarian) | [-1, +1] | Raised from 5%: extreme funding = best reversals |
+| **Liquidation** | 10% | Real exchange liquidation imbalance | [-1, +1] | No data = 0.0 (truly neutral) |
+
+### Scoring Pipeline
+
+```
+Raw Component Scores [-1, +1]
+    → Weighted sum → Normalize by total weight
+    → Time-decay (half-life 2 min after 30s fresh window)
+    → BTC cross-correlation (20% blend for alts)
+    → Non-linear transform: pow(score, 0.7)
+    → Map to 0-100 scale: (boosted + 1) * 50
+    → Bias: >= 55 = LONG, <= 45 = SHORT, else NEUTRAL
+```
+
+### v2 Design Decisions
+
+1. **Volatility is direction-neutral**: Compression/expansion amplifies the existing directional bias but does NOT add a directional signal. Prevents false bullish bias in sideways markets.
+
+2. **No-data = truly neutral**: When liquidation data is unavailable, score = 0.0 (not +0.05). Prevents systematic LONG bias on alt-coins without liquidation feeds.
+
+3. **Funding as contrarian signal (15% weight)**: Extreme positive funding → bearish (crowded longs), extreme negative → bullish. Weight raised because funding extremes historically precede the strongest reversals.
+
+4. **Time-decay**: Signals older than 30 seconds begin decaying exponentially (half-life 2 minutes). Prevents "zombie convictions" from persisting when the market goes flat.
+
+5. **BTC cross-correlation**: Alt-coin scores blend 80% own signal + 20% BTC signal (scaled by per-asset correlation coefficient: ETH=0.85, SOL=0.78, etc.). Only applies if BTC signal is < 120s old.
+
+6. **Dynamic R:R**: Risk/reward ratio adapts to regime:
+   - Compression → 3:1 (expect big breakout)
+   - Expansion → 1.5:1 (take profits earlier)
+   - Strong conviction (± 20 from neutral) → 1.2× multiplier
+
+### Frontend Smoothing (useAlphaStore)
+
+- **Score EMA**: α=0.08, deadband=3% (only updates UI on significant change)
+- **Bias stability**: Requires 5 consecutive same-side readings before switching displayed bias
+- **Force refresh**: After 10s of no updates, force display raw values
+
+### Two Conviction Paths
+
+| Path | Used For | Smoothing |
+|---|---|---|
+| `_run_pipeline` (real-time) | WebSocket stream every ~200ms | ConvictionEngine only + frontend EMA |
+| `conviction_service.get_conviction` (REST) | On-demand `/alpha/conviction/{sym}` | ConvictionEngine + backend 10-reading rolling avg |
+
+Both use the same `ConvictionEngine.analyze()`. REST path adds server-side smoothing.
+
+## 22) Autonomous Execution Gates
+
+For auto-trading to trigger, ALL conditions must be true:
+
+| Gate | Check Point | Value |
+|---|---|---|
+| conviction.score | Backend `_check_and_execute_auto_trade` | >= 65 |
+| bias_streak | Frontend `useAlphaAutonomousExecution` | >= 5 consecutive readings |
+| auto_mode_enabled | User risk settings or `RISK_AUTO_MODE_ENABLED` env | true |
+| size_usd | Backend trade check | >= $5 |
+| HyperLiquid client | Backend TraderManager | Must exist |
+| Per-symbol cooldown | Frontend hook | 60 seconds |
+| Max concurrent trades | Frontend hook | 3 |
+
+Flow:
+```
+Frontend detects score >= 65 & streak >= 5
+    → POST /alpha/autonomous/trigger
+    → Backend calls _safe_run_pipeline(symbol)
+    → _run_pipeline re-computes conviction
+    → _check_and_execute_auto_trade validates all gates
+    → If all pass: market_open() on HyperLiquid
+```
+
+## 23) Known Patterns & Gotchas
+
+1. **Event loop starvation**: High-frequency data (liquidations, trades) MUST be batched. Individual event processing at 100+/sec starves asyncio, causing WebSocket disconnects and STALE UI.
+
+2. **Fire-and-forget tasks**: All `asyncio.create_task()` calls in `main.py` use the `_track()` wrapper to log exceptions. Without it, failures are silently swallowed.
+
+3. **Singleton pattern**: AlphaService, CryptofeedLiqService, EventRelay, Aggregator use module-level singleton instances. Initialization order matters.
+
+4. **Frontend smoothing hides rapid changes**: The Zustand store's EMA + bias-streak means a backend score delta < 3% won't update the UI. This is intentional to prevent flicker but can mask signal changes during debugging.
+
+5. **Simplified alpha service**: `SimplifiedAlphaService` exists as legacy (3 basic signals, fixed thresholds). UI no longer exposes it — all display uses the full ConvictionEngine.
+
+6. **Bare `except:` clauses**: Found in `manager.py`, `liquidation_feed.py`, `alpha_service.py`, `twap_detector.py`, `worldmonitor.py`. Can swallow `KeyboardInterrupt`/`SystemExit`. Should be refined to catch specific exceptions.
+
+7. **`external_liquidation_fetcher.py`**: Dead code — no imports remain. Safe to delete.
+

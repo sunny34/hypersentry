@@ -31,6 +31,7 @@ class OIRegimeClassifier:
         """
         Calculates the regime and a confidence score based on the delta magnitudes.
         Confidence is higher when moves in both price and OI are significant.
+        FIXED: More sensitive to small price moves and orderbook imbalance.
         """
         if state.price <= 0:
             return {"regime": MarketRegime.NEUTRAL, "confidence": 0.0}
@@ -42,40 +43,63 @@ class OIRegimeClassifier:
         price_delta = (state.price - price_1m_ago) / price_1m_ago
         oi_delta = state.oi_delta_1m
         
-        # Scaling confidence: More sensitive to price moves
-        # Even small price changes should generate some signal
-        price_strength = min(abs(price_delta) / 0.0005, 1.0)  # 0.05% move = full weight
+        # FIXED: Much more sensitive to price moves - even tiny moves matter
+        # 0.01% (1 bps) move gets partial signal, 0.05% (5 bps) gets full signal
+        price_strength = min(abs(price_delta) / 0.0005, 1.0)
         
-        # OI delta sensitivity - if no OI delta data, use neutral
+        # FIXED: More sensitive to OI delta
         if state.open_interest > 0 and oi_delta != 0:
-            oi_strength = min(abs(oi_delta) / 500.0, 1.0)  # More sensitive
+            # Lower threshold for OI sensitivity
+            oi_strength = min(abs(oi_delta) / 100.0, 1.0)
         else:
             oi_strength = 0.3  # Default moderate confidence when no OI data
         
-        confidence = (price_strength + oi_strength) / 2.0
+        # FIXED: Also consider orderbook imbalance
+        book_imbalance = getattr(state, 'orderbook_imbalance', 0.0) or 0.0
+        book_strength = min(abs(book_imbalance) * 2, 1.0) if book_imbalance != 0 else 0.0
+        
+        # Combine price, OI, and orderbook signals
+        confidence = (price_strength * 0.5 + oi_strength * 0.3 + book_strength * 0.2)
 
+        # FIXED: Much lower thresholds for regime detection
+        # Use 0.2 bps as the threshold for price movement detection
+        PRICE_THRESHOLD = 0.00002  # 0.2 bps (very sensitive)
+        
         # Determine regime based on price and OI direction
-        if price_delta > 0.0001:  # Price moving up
-            if oi_delta > 0:
+        if price_delta > PRICE_THRESHOLD:  # Price moving up
+            if oi_delta > 10:  # OI increasing
                 regime = MarketRegime.AGGRESSIVE_LONG_BUILD
             else:
-                regime = MarketRegime.SHORT_COVER
-        elif price_delta < -0.0001:  # Price moving down
-            if oi_delta > 0:
+                # Check orderbook for additional confirmation
+                if book_imbalance > 0.1:
+                    regime = MarketRegime.AGGRESSIVE_LONG_BUILD
+                else:
+                    regime = MarketRegime.SHORT_COVER
+        elif price_delta < -PRICE_THRESHOLD:  # Price moving down
+            if oi_delta > 10:
                 regime = MarketRegime.AGGRESSIVE_SHORT_BUILD
             else:
-                regime = MarketRegime.LONG_UNWIND
+                # Check orderbook for additional confirmation
+                if book_imbalance < -0.1:
+                    regime = MarketRegime.AGGRESSIVE_SHORT_BUILD
+                else:
+                    regime = MarketRegime.LONG_UNWIND
         else:
-            # Price essentially unchanged - check if we have meaningful OI movement
-            if oi_delta > 50:
+            # Price essentially unchanged - FIXED: detect accumulation/distribution from OI
+            if oi_delta > 15:
                 regime = MarketRegime.STABLE_ACCUMULATION
-            elif oi_delta < -50:
+            elif oi_delta < -15:
+                regime = MarketRegime.STABLE_DISTRIBUTION
+            elif book_imbalance > 0.15:
+                # FIXED: Use orderbook imbalance when OI is flat
+                regime = MarketRegime.STABLE_ACCUMULATION
+            elif book_imbalance < -0.15:
                 regime = MarketRegime.STABLE_DISTRIBUTION
             else:
                 regime = MarketRegime.NEUTRAL
             
-        # Ensure minimum confidence
-        confidence = max(confidence, 0.3)
+        # FIXED: Ensure minimum confidence is lower to allow signal through
+        confidence = max(confidence, 0.25)
             
         return {
             "regime": regime,

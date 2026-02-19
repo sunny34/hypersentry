@@ -27,7 +27,8 @@ class AbsorptionDetector:
 
         start_px = window_trades[0].price
         end_px = window_trades[-1].price
-        px_change_pct = abs(end_px - start_px) / start_px
+        # Guard against division by zero
+        px_change_pct = abs(end_px - start_px) / start_px if start_px > 0 else 0.0
         
         buy_vol = sum(t.size for t in window_trades if t.side == "BUY")
         sell_vol = sum(t.size for t in window_trades if t.side == "SELL")

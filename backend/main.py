@@ -74,36 +74,75 @@ async def lifespan(app: FastAPI):
     
     # Start restoring wallets in background
     import asyncio
+
+    # Track background tasks so exceptions don't silently disappear
+    _bg_tasks: list[asyncio.Task] = []
+    def _track(coro, name: str):
+        async def _wrapper():
+            try:
+                await coro
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"❌ Background task '{name}' failed: {e}", exc_info=True)
+        task = asyncio.create_task(_wrapper(), name=name)
+        _bg_tasks.append(task)
+        return task
+
     async def background_restore():
         logger.info("⏳ Starting background wallet restoration...")
-        try:
-             await manager.restore_wallets()
-             logger.info("✅ Background wallet restoration complete.")
-        except Exception as e:
-             logger.error(f"❌ Background restore failed: {e}")
+        await manager.restore_wallets()
+        logger.info("✅ Background wallet restoration complete.")
 
-    asyncio.create_task(background_restore())
+    _track(background_restore(), "wallet_restore")
+    _track(bridge_monitor.start(), "bridge_monitor")
+    _track(intel_engine.start(), "intel_engine")
     
-    # Start bridge monitor in background
-    asyncio.create_task(bridge_monitor.start())
-    
-    # Start Intel Engine in background
-    asyncio.create_task(intel_engine.start())
+    # Start User Balance WebSocket subscription (real-time balance from Hyperliquid)
+    try:
+        from src.services.user_balance_service import user_balance_ws
+        await user_balance_ws.start()
+        logger.info("✅ User balance WebSocket subscription started")
+    except Exception as e:
+        logger.warning(f"Could not start balance WS: {e}")
 
     # Start event bus backend (inproc by default, kafka optional via env)
     from src.services.event_bus import event_bus
     app.state.event_bus = event_bus
     await event_bus.start()
 
-    # Start internal event relay (decouples producers from direct WS fanout)
+    # Start cryptofeed multi-exchange liquidation feed (Binance Futures, Bybit, OKX)
+    # Real liquidation data only — no estimates.
+    try:
+        from src.services.cryptofeed_liquidation_service import cryptofeed_liquidation_service
+        app.state.cryptofeed_liquidation = cryptofeed_liquidation_service
+        await cryptofeed_liquidation_service.start()
+        logger.info("✅ Cryptofeed multi-exchange liquidation service started")
+    except Exception as e:
+        logger.warning(f"⚠️ Cryptofeed liquidation service failed, falling back to direct WS: {e}")
+        # Fallback: start direct Binance WS if cryptofeed fails
+        try:
+            from src.services.realtime_liquidation_ws import liquidation_ws
+            app.state.liquidation_ws = liquidation_ws
+            await liquidation_ws.start()
+            logger.info("✅ Fallback: Direct Binance liquidation WS started")
+        except Exception as e2:
+            logger.error(f"❌ All liquidation feeds failed: {e2}")
+
+    # Start liquidation event listener (forwards events to alpha service)
+    from src.services.liquidation_event_listener import liquidation_event_listener
+    app.state.liquidation_event_listener = liquidation_event_listener
+    await liquidation_event_listener.start()
+
+    # Start event relay (bridges event_bus -> WebSocket clients)
     from src.services.event_relay import event_relay
     app.state.event_relay = event_relay
     await event_relay.start()
-    
-    # Initialize Data Aggregator
+
+    # Start aggregator (fetches market data, publishes to event_bus)
     from src.services.aggregator import aggregator
     app.state.aggregator = aggregator
-    asyncio.create_task(aggregator.start())
+    _track(aggregator.start(), "aggregator")
     
     # Initialize Whale Tracker
     whale_tracker = WhaleTracker(
@@ -113,14 +152,28 @@ async def lifespan(app: FastAPI):
         notifier=telegram_bot,
     )
     app.state.whale_tracker = whale_tracker
-    asyncio.create_task(whale_tracker.start())
+    _track(whale_tracker.start(), "whale_tracker")
+    app.state._bg_tasks = _bg_tasks
     
+    # Initialize Alpha Engine User Context for Auto-Trading
+    try:
+        from src.alpha_engine.services.alpha_service import alpha_service
+        alpha_service.initialize_system_identity()
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Auto-Trade Identity: {e}")
+
     yield
     # Shutdown
     logger.info("🛑 Shutting down manager...")
     bridge_monitor.stop()
     intel_engine.stop()
-    whale_tracker.stop()
+    await whale_tracker.stop()
+    if hasattr(app.state, "cryptofeed_liquidation"):
+        await app.state.cryptofeed_liquidation.stop()
+    if hasattr(app.state, "liquidation_ws"):
+        await app.state.liquidation_ws.stop()
+    if hasattr(app.state, "liquidation_event_listener"):
+        await app.state.liquidation_event_listener.stop()
     if hasattr(app.state, "aggregator"):
         await app.state.aggregator.stop()
     if hasattr(app.state, "event_relay"):

@@ -29,7 +29,25 @@ class StateStore:
             if "timestamp" not in updates:
                 setattr(state, "timestamp", int(time.time() * 1000))
             for key, value in updates.items():
-                if hasattr(state, key):
+                if not hasattr(state, key):
+                    continue
+
+                # Special handling for liquidation_levels: merge instead of overwrite
+                if key == "liquidation_levels" and isinstance(value, list):
+                    existing = getattr(state, "liquidation_levels") or []
+                    # Add new liquidation levels, avoiding duplicates by price+side
+                    existing_prices = {(l.price, l.side) for l in existing if hasattr(l, 'price')}
+                    merged = list(existing)
+                    for new_liq in value:
+                        if hasattr(new_liq, 'price') and hasattr(new_liq, 'side'):
+                            key_tuple = (new_liq.price, new_liq.side)
+                            if key_tuple not in existing_prices:
+                                merged.append(new_liq)
+                                existing_prices.add(key_tuple)
+                    # Keep only last 100 liquidation levels per symbol
+                    merged = merged[-100:]
+                    setattr(state, key, merged)
+                else:
                     setattr(state, key, value)
 
     async def get_state(self, symbol: str) -> Optional[MarketState]:

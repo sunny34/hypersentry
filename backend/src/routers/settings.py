@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
-from models import User, UserKey
+from models import User, UserKey, UserTradingSettings
 from database import get_db
 from auth import require_user
 from schemas import KeyInput
@@ -95,3 +95,124 @@ async def delete_api_key(
     db.delete(key)
     db.commit()
     return {"status": "deleted"}
+
+
+# Trading Settings Models
+from pydantic import BaseModel
+from typing import Optional
+
+class TradingSettingsInput(BaseModel):
+    equity_usd: Optional[float] = None
+    max_position_usd: Optional[float] = None
+    max_risk_pct: Optional[float] = None
+    max_leverage: Optional[float] = None
+    target_profit_pct: Optional[float] = None
+    stop_loss_pct: Optional[float] = None
+    auto_mode_enabled: Optional[bool] = None
+    max_daily_trades: Optional[int] = None
+    max_daily_loss_pct: Optional[float] = None
+
+
+@router.get("/trading")
+async def get_trading_settings(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db)
+):
+    """Get user's trading settings"""
+    settings = db.query(UserTradingSettings).filter(
+        UserTradingSettings.user_id == user.id
+    ).first()
+    
+    if not settings:
+        # Return defaults
+        return UserTradingSettings(
+            user_id=user.id,
+            equity_usd=100000.0,
+            max_position_usd=1000.0,
+            max_risk_pct=0.02,
+            max_leverage=3.0,
+            target_profit_pct=0.03,
+            stop_loss_pct=0.01,
+            auto_mode_enabled=False,
+            max_daily_trades=5,
+            max_daily_loss_pct=0.05,
+        ).to_dict()
+    
+    return settings.to_dict()
+
+
+@router.post("/trading")
+async def update_trading_settings(
+    data: TradingSettingsInput,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db)
+):
+    """Update user's trading settings"""
+    settings = db.query(UserTradingSettings).filter(
+        UserTradingSettings.user_id == user.id
+    ).first()
+    
+    if not settings:
+        settings = UserTradingSettings(user_id=user.id)
+        db.add(settings)
+    
+    # Update only provided fields
+    if data.equity_usd is not None:
+        settings.equity_usd = data.equity_usd
+    if data.max_position_usd is not None:
+        settings.max_position_usd = data.max_position_usd
+    if data.max_risk_pct is not None:
+        settings.max_risk_pct = data.max_risk_pct
+    if data.max_leverage is not None:
+        settings.max_leverage = data.max_leverage
+    if data.target_profit_pct is not None:
+        settings.target_profit_pct = data.target_profit_pct
+    if data.stop_loss_pct is not None:
+        settings.stop_loss_pct = data.stop_loss_pct
+    if data.auto_mode_enabled is not None:
+        settings.auto_mode_enabled = data.auto_mode_enabled
+    if data.max_daily_trades is not None:
+        settings.max_daily_trades = data.max_daily_trades
+    if data.max_daily_loss_pct is not None:
+        settings.max_daily_loss_pct = data.max_daily_loss_pct
+    
+    db.commit()
+    db.refresh(settings)
+    return settings.to_dict()
+
+
+@router.post("/trading/enable-autonomous")
+async def enable_autonomous_mode(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db)
+):
+    """Enable autonomous trading mode"""
+    settings = db.query(UserTradingSettings).filter(
+        UserTradingSettings.user_id == user.id
+    ).first()
+    
+    if not settings:
+        return {"error": "Please configure trading settings first"}
+    
+    if not settings.auto_mode_enabled:
+        settings.auto_mode_enabled = True
+        db.commit()
+    
+    return {"status": "enabled", "settings": settings.to_dict()}
+
+
+@router.post("/trading/disable-autonomous")
+async def disable_autonomous_mode(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db)
+):
+    """Disable autonomous trading mode"""
+    settings = db.query(UserTradingSettings).filter(
+        UserTradingSettings.user_id == user.id
+    ).first()
+    
+    if settings and settings.auto_mode_enabled:
+        settings.auto_mode_enabled = False
+        db.commit()
+    
+    return {"status": "disabled"}

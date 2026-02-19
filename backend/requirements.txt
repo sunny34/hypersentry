@@ -76,6 +76,7 @@ yarl
 gunicorn
 uvicorn
 feedparser
+cryptofeed
 
 celery
 redis

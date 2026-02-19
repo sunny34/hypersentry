@@ -1286,6 +1286,7 @@ class DataAggregator:
                     {
                         "orderbook_bids": [(float(l["px"]), float(l["sz"])) for l in levels[0][:25]],
                         "orderbook_asks": [(float(l["px"]), float(l["sz"])) for l in levels[1][:25]],
+                        "_debug_book_count": len(levels[0]) + len(levels[1]),
                     },
                 )
                 self._update_cache(coin, "walls", self._detect_walls(levels))
@@ -1353,6 +1354,7 @@ class DataAggregator:
                 notional=sz * px,
                 side=liq_side,
             )
+            logger.info(f"=== AGGREGATOR LIQUIDATION: {coin} px={px} sz={sz} side={side} ===")
             self._enqueue_alpha_update(coin, {"liquidation_event": liq_obj})
             if coin not in self.data_cache:
                 self.data_cache[coin] = {"price": 0, "book": [[], []], "trades": [], "walls": [], "liquidations": []}

@@ -2,6 +2,7 @@
 import React from 'react';
 import { useAlphaStore } from '../../../store/useAlphaStore';
 import { useMarketStore } from '../../../store/useMarketStore';
+import { useTradingSettings } from '@/hooks/useTradingSettings';
 
 const PortfolioRiskPanel = () => {
     const activeSymbol = useAlphaStore((s) => s.activeSymbol || 'BTC');
@@ -10,6 +11,11 @@ const PortfolioRiskPanel = () => {
     const risk = useAlphaStore((s) => s.risks[activeSymbol]);
     const stream = useAlphaStore((s) => s.stream);
     const market = useMarketStore((s) => s.marketData[activeSymbol]);
+    
+    // User's trading settings
+    const { settings } = useTradingSettings();
+    const userEquity = settings?.equity_usd || 100000;
+    const userMaxPosition = settings?.max_position_usd || 1000;
 
     const riskPctRaw = Number(risk?.risk_percent_equity);
     const estRiskPct = Number.isFinite(riskPctRaw)
@@ -20,6 +26,9 @@ const PortfolioRiskPanel = () => {
     const equityUsed = Number(risk?.equity_used || 0);
     const capUsd = Number(risk?.max_position_cap_usd || 0);
     const oi = market?.external_oi?.open_interest ?? market?.oi ?? 0;
+    const stopLoss = Number(risk?.stop_loss_price || 0);
+    const takeProfit = Number(risk?.take_profit_price || 0);
+    const currentPrice = market?.price || 0;
 
     return (
         <div className="h-full flex flex-col bg-gray-950/30">
@@ -41,18 +50,31 @@ const PortfolioRiskPanel = () => {
                     <div className="border border-gray-800 bg-black/40 p-3 rounded">
                         <div className="text-[10px] uppercase text-gray-500">Planned Exposure</div>
                         <div className="text-blue-400 font-bold">${exposureUsd.toFixed(0)}</div>
-                        {(equityUsed > 0 || capUsd > 0) && (
-                            <div className="text-[9px] text-gray-600 mt-1">
-                                {equityUsed > 0 ? `eq $${equityUsed.toFixed(0)}` : 'eq n/a'}
-                                {capUsd > 0 ? ` · cap $${capUsd.toFixed(0)}` : ''}
-                            </div>
-                        )}
+                        <div className="text-[9px] text-gray-600 mt-1">
+                            eq ${userEquity.toFixed(0)} · cap ${userMaxPosition.toFixed(0)}
+                        </div>
                     </div>
                     <div className="border border-gray-800 bg-black/40 p-3 rounded">
                         <div className="text-[10px] uppercase text-gray-500">Planned Risk</div>
                         <div className="text-yellow-400 font-bold">{estRiskPct.toFixed(2)}%</div>
                     </div>
                 </div>
+                {(stopLoss > 0 || takeProfit > 0) && (
+                <div className="grid grid-cols-3 gap-2">
+                    <div className="border border-gray-800 bg-black/40 p-2 rounded text-center">
+                        <div className="text-[9px] uppercase text-gray-500">Entry (est)</div>
+                        <div className="text-white text-xs font-bold">${currentPrice.toFixed(2)}</div>
+                    </div>
+                    <div className="border border-red-900/50 bg-red-950/20 p-2 rounded text-center">
+                        <div className="text-[9px] uppercase text-gray-500">Stop Loss</div>
+                        <div className="text-red-400 text-xs font-bold">${stopLoss.toFixed(2)}</div>
+                    </div>
+                    <div className="border border-green-900/50 bg-green-950/20 p-2 rounded text-center">
+                        <div className="text-[9px] uppercase text-gray-500">Take Profit</div>
+                        <div className="text-green-400 text-xs font-bold">${takeProfit.toFixed(2)}</div>
+                    </div>
+                </div>
+                )}
                 <div className="border border-gray-800 bg-black/40 p-3 rounded">
                     <div className="flex justify-between text-[10px] uppercase text-gray-500 mb-1">
                         <span>Expected Impact</span>

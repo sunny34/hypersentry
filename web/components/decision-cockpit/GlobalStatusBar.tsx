@@ -2,12 +2,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Settings } from 'lucide-react';
 import { useAlphaStore } from '../../store/useAlphaStore';
+import { useTradingSettings } from '@/hooks/useTradingSettings';
+import TradingSettingsPanel from './widgets/TradingSettingsPanel';
 import ModeSwitcher from './ModeSwitcher';
 
 const GlobalStatusBar = () => {
     const { governance, risks, executionPlans, convictions, executionLogs, activeSymbol, stream } = useAlphaStore();
+    const { settings } = useTradingSettings();
+    const [settingsOpen, setSettingsOpen] = useState(false);
     const [now, setNow] = useState(() => Date.now());
 
     // Get live data if meaningful
@@ -58,63 +62,75 @@ const GlobalStatusBar = () => {
     };
 
     return (
-        <div className="w-full bg-black border-b border-gray-800 px-3 sm:px-6 py-2 sm:py-2.5 text-[10px] sm:text-xs font-mono uppercase tracking-wide sm:tracking-widest">
-            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2">
-                <div className="flex items-center gap-3 sm:gap-6 overflow-x-auto whitespace-nowrap pb-1 xl:pb-0 no-scrollbar">
-                    <Link
-                        href="/terminal"
-                        className="flex items-center gap-1.5 px-2 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 transition-colors group shrink-0"
-                    >
-                        <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-white transition-colors" />
-                        <span className="text-[10px] font-bold text-gray-400 group-hover:text-white transition-colors">TERMINAL</span>
-                    </Link>
+        <>
+            <div className="w-full bg-black border-b border-gray-800 px-3 sm:px-6 py-2 sm:py-2.5 text-[10px] sm:text-xs font-mono uppercase tracking-wide sm:tracking-widest">
+                <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2">
+                    <div className="flex items-center gap-3 sm:gap-6 overflow-x-auto whitespace-nowrap pb-1 xl:pb-0 no-scrollbar">
+                        <Link
+                            href="/terminal"
+                            className="flex items-center gap-1.5 px-2 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 transition-colors group shrink-0"
+                        >
+                            <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-white transition-colors" />
+                            <span className="text-[10px] font-bold text-gray-400 group-hover:text-white transition-colors">TERMINAL</span>
+                        </Link>
 
-                    <div className="hidden sm:block h-4 w-[1px] bg-gray-800 shrink-0" />
+                        <div className="hidden sm:block h-4 w-[1px] bg-gray-800 shrink-0" />
 
-                    <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-                        <span className="text-gray-600">System Ops:</span>
-                        <ModeSwitcher />
+                        <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
+                            <span className="text-gray-600">System Ops:</span>
+                            <ModeSwitcher />
+                        </div>
+
+                        <div className="hidden sm:block h-4 w-[1px] bg-gray-800 shrink-0" />
+
+                        <div className="flex items-center space-x-2 shrink-0">
+                            <span className="text-gray-500">Regime:</span>
+                            <span className={`font-bold ${getRegimeColor(regime)}`}>{regime}</span>
+                        </div>
+
+                        <div className="hidden sm:block h-4 w-[1px] bg-gray-800 shrink-0" />
+
+                        <div className="flex items-center space-x-2 shrink-0">
+                            <span className="text-gray-500">Health:</span>
+                            <span className={`font-bold ${health === 'OPTIMAL' ? 'text-green-400' : 'text-yellow-500'}`}>
+                                {health}
+                            </span>
+                        </div>
+
+                        <div className="hidden sm:block h-4 w-[1px] bg-gray-800 shrink-0" />
+
+                        <div className="flex items-center space-x-2 shrink-0">
+                            <span className="text-gray-500">Stream:</span>
+                            <span className={`font-bold ${streamColor}`}>{derivedStreamStatus.toUpperCase()}</span>
+                            {streamLagMs !== null && (
+                                <span className="text-[9px] sm:text-[10px] text-gray-600">{(streamLagMs / 1000).toFixed(1)}s</span>
+                            )}
+                        </div>
                     </div>
 
-                    <div className="hidden sm:block h-4 w-[1px] bg-gray-800 shrink-0" />
-
-                    <div className="flex items-center space-x-2 shrink-0">
-                        <span className="text-gray-500">Regime:</span>
-                        <span className={`font-bold ${getRegimeColor(regime)}`}>{regime}</span>
-                    </div>
-
-                    <div className="hidden sm:block h-4 w-[1px] bg-gray-800 shrink-0" />
-
-                    <div className="flex items-center space-x-2 shrink-0">
-                        <span className="text-gray-500">Health:</span>
-                        <span className={`font-bold ${health === 'OPTIMAL' ? 'text-green-400' : 'text-yellow-500'}`}>
-                            {health}
-                        </span>
-                    </div>
-
-                    <div className="hidden sm:block h-4 w-[1px] bg-gray-800 shrink-0" />
-
-                    <div className="flex items-center space-x-2 shrink-0">
-                        <span className="text-gray-500">Stream:</span>
-                        <span className={`font-bold ${streamColor}`}>{derivedStreamStatus.toUpperCase()}</span>
-                        {streamLagMs !== null && (
-                            <span className="text-[9px] sm:text-[10px] text-gray-600">{(streamLagMs / 1000).toFixed(1)}s</span>
-                        )}
-                    </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-4 sm:gap-6">
-                    <div className="flex items-center space-x-2">
-                        <span className="text-gray-500">Risk Deployed:</span>
-                        <span className="text-white font-bold">{deployedPct.toFixed(2)}%</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                        <span className="text-gray-500">Signal Drift:</span>
-                        <span className={`${pnlColor} font-bold`}>{dailyPnlProxy >= 0 ? '+' : ''}{dailyPnlProxy.toFixed(2)}%</span>
+                    <div className="flex items-center justify-end gap-4 sm:gap-6">
+                        <div className="flex items-center space-x-2">
+                            <span className="text-gray-500">Risk Deployed:</span>
+                            <span className="text-white font-bold">{deployedPct.toFixed(2)}%</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <span className="text-gray-500">Signal Drift:</span>
+                            <span className={`${pnlColor} font-bold`}>{dailyPnlProxy >= 0 ? '+' : ''}{dailyPnlProxy.toFixed(2)}%</span>
+                        </div>
+                        <button
+                            onClick={() => setSettingsOpen(true)}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 transition-colors"
+                            title="Trading Settings"
+                        >
+                            <Settings className="w-3 h-3 text-gray-400" />
+                            <span className="text-[10px] font-bold text-gray-400">SETTINGS</span>
+                        </button>
                     </div>
                 </div>
             </div>
-        </div>
+
+            <TradingSettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        </>
     );
 };
 

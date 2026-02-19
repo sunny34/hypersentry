@@ -272,6 +272,14 @@ async def wallet_verify(
     db.commit()
     db.refresh(user)
 
+    # Subscribe to real-time balance updates for this wallet
+    try:
+        from src.services.user_balance_service import user_balance_ws
+        await user_balance_ws.subscribe_user(address_lower, str(user.id))
+    except Exception as e:
+        # Don't fail login if subscription fails
+        pass
+
     return {
         "token": token,
         "user": user.to_dict(),
@@ -299,6 +307,72 @@ async def update_profile(
 
 
 @router.post("/logout")
-async def logout(user: User = Depends(require_user)):
+async def logout(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Logout current user (client should discard token)"""
+    # Unsubscribe from balance updates
+    try:
+        from src.services.user_balance_service import user_balance_ws
+        wallet = db.query(Wallet).filter(Wallet.user_id == user.id).first()
+        if wallet:
+            await user_balance_ws.unsubscribe_user(wallet.address)
+    except Exception:
+        pass
+    
+    # Clear alpha engine user context
+    try:
+        from src.alpha_engine.services.alpha_service import alpha_service
+        alpha_service.clear_user_context()
+    except Exception:
+        pass
+    
     return {"status": "logged_out", "message": "Token should be discarded by client"}
+
+
+@router.post("/alpha-context")
+async def set_alpha_context(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db)
+):
+    """Set user context for alpha engine after login."""
+    # Get user's wallet address
+    wallet = db.query(Wallet).filter(Wallet.user_id == user.id).first()
+    if not wallet:
+        return {"error": "No wallet connected"}
+    
+    # Load user's trading settings
+    from models import UserTradingSettings
+    settings = db.query(UserTradingSettings).filter(
+        UserTradingSettings.user_id == user.id
+    ).first()
+    
+    # Set alpha engine user context
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        from src.alpha_engine.services.alpha_service import alpha_service
+        from src.alpha_engine.risk.risk_service import risk_service
+        
+        import sys
+        print(f"=== ALPHA CONTEXT CALLED: user={user.id}, wallet={wallet.address[:10]} ===", flush=True)
+        logger.info(f"=== ALPHA CONTEXT: user.id={user.id}, wallet={wallet.address[:10]}... ===")
+        alpha_service.set_user_context(str(user.id), wallet.address)
+        print(f"=== AFTER SET: _active_user_id={alpha_service._active_user_id} ===", flush=True)
+        logger.info(f"Alpha service user context set. _active_user_id={alpha_service._active_user_id}")
+        
+        # Also load user settings into risk service
+        if settings:
+            logger.info(f"Loading user trading settings: equity={settings.equity_usd}, max_pos={settings.max_position_usd}, max_risk={settings.max_risk_pct}, auto_mode={settings.auto_mode_enabled}")
+            risk_service.load_user_settings(str(user.id), db)
+            logger.info(f"Risk service settings loaded: {risk_service._user_settings}")
+        else:
+            logger.warning(f"No trading settings found for user {user.id}")
+        
+        return {
+            "status": "ok",
+            "user_id": str(user.id),
+            "wallet": wallet.address[:10] + "...",
+            "settings_loaded": settings is not None
+        }
+    except Exception as e:
+        return {"error": str(e)}
