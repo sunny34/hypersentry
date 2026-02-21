@@ -29,6 +29,16 @@ wallets.json
 twaps.json
 *.csv
 
+# Backend heavy runtime artifacts (frontend build uses repo-root context)
+backend/venv/
+backend/.venv/
+backend/logs/
+backend/*.log
+backend/live_backend.log
+backend/sentry.db
+backend/.pytest_cache/
+backend/__pycache__/
+
 # Docs
 *.md
 !README.md

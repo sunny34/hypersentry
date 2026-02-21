@@ -1,0 +1,34 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Local runtime / logs
+logs/
+*.log
+live_backend.log
+backend.log
+backend_new.log
+server.log
+feedhandler.log
+
+# Local data / secrets
+.env
+.env.local
+.coverage
+coverage.xml
+sentry.db
+wallets.json
+twaps.json
+
+# Git / editor
+.git/
+.idea/
+.vscode/
+.DS_Store

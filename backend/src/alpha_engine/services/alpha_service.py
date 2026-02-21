@@ -306,6 +306,17 @@ class AlphaService:
             return False
 
     @staticmethod
+    def _orderbook_imbalance_to_ratio(raw_value: object) -> float:
+        try:
+            val = float(raw_value)
+        except Exception:
+            return 1.0
+        if abs(val) <= 1.0:
+            signed = max(-0.98, min(0.98, val))
+            return max(0.01, (1.0 + signed) / (1.0 - signed))
+        return max(0.01, val)
+
+    @staticmethod
     def _safe_float(value: object, default: float = 0.0) -> float:
         try:
             parsed = float(value)  # type: ignore[arg-type]
@@ -587,6 +598,8 @@ class AlphaService:
                 "cvd_spot_binance_5m",
                 "cvd_spot_coinbase_1m",
                 "cvd_spot_coinbase_5m",
+                "cvd_spot_okx_1m",
+                "cvd_spot_okx_5m",
                 "cvd_spot_composite_1m",
                 "cvd_spot_composite_5m",
             ):
@@ -693,7 +706,7 @@ class AlphaService:
         bids = list(state.orderbook_bids or [])
         asks = list(state.orderbook_asks or [])
         if not bids or not asks:
-            imbalance = state.orderbook_imbalance if state.orderbook_imbalance else 1.0
+            imbalance = AlphaService._orderbook_imbalance_to_ratio(state.orderbook_imbalance)
             return 100000.0, 10.0, max(0.01, float(imbalance))
 
         best_bid = float(bids[0][0])
@@ -710,7 +723,7 @@ class AlphaService:
         ask_size = sum(max(0.0, float(sz)) for _, sz in asks[:top_n])
         imbalance_ratio = (bid_size + 1e-9) / (ask_size + 1e-9)
         if state.orderbook_imbalance:
-            imbalance_ratio = max(0.01, float(state.orderbook_imbalance))
+            imbalance_ratio = AlphaService._orderbook_imbalance_to_ratio(state.orderbook_imbalance)
 
         return liquidity_usd, spread_bps, max(0.01, imbalance_ratio)
 

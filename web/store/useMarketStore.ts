@@ -32,6 +32,7 @@ interface TokenData {
     book: [OrderBookLevel[], OrderBookLevel[]];
     book_ts?: number;
     updated_at?: number;
+    orderbook_imbalance?: number;
     trades: Trade[];
     walls: LiquidityWall[];
     cvd: number;
@@ -41,6 +42,8 @@ interface TokenData {
         cvd_spot_binance_5m?: number;
         cvd_spot_coinbase_1m?: number;
         cvd_spot_coinbase_5m?: number;
+        cvd_spot_okx_1m?: number;
+        cvd_spot_okx_5m?: number;
         cvd_spot_composite_1m?: number;
         cvd_spot_composite_5m?: number;
         cvd_source?: string;
@@ -48,7 +51,9 @@ interface TokenData {
     external_oi?: {
         open_interest?: number;
         open_interest_hl?: number;
+        open_interest_hl_contracts?: number;
         open_interest_binance_perp?: number;
+        open_interest_ref_price?: number;
         open_interest_source?: string;
     };
 }

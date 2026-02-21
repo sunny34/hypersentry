@@ -107,12 +107,18 @@ class DataAggregator:
             cls._instance.oi_weight_binance = max(0.0, float(os.getenv("AGGREGATOR_OI_BINANCE_WEIGHT", "0.35")))
             cls._instance.cvd_weight_binance = max(0.0, float(os.getenv("AGGREGATOR_CVD_BINANCE_WEIGHT", "0.70")))
             cls._instance.cvd_weight_coinbase = max(0.0, float(os.getenv("AGGREGATOR_CVD_COINBASE_WEIGHT", "0.30")))
+            cls._instance.cvd_weight_okx = max(0.0, float(os.getenv("AGGREGATOR_CVD_OKX_WEIGHT", "0.20")))
+            cls._instance.wall_persist_keep_ms = max(30_000, int(os.getenv("AGGREGATOR_WALL_PERSIST_KEEP_MS", "180000")))
+            cls._instance.wall_confirm_hits = max(1, int(os.getenv("AGGREGATOR_WALL_CONFIRM_HITS", "3")))
             cls._instance.external_metrics: Dict[str, Dict[str, Any]] = {}
             cls._instance._binance_external_subs: Set[str] = set()
             cls._instance._coinbase_external_subs: Set[str] = set()
+            cls._instance._okx_external_subs: Set[str] = set()
             cls._instance._binance_external_blocklist: Set[str] = set()
             cls._instance._coinbase_external_blocklist: Set[str] = set()
+            cls._instance._okx_external_blocklist: Set[str] = set()
             cls._instance._binance_external_pending: Dict[int, str] = {}
+            cls._instance.wall_persistence: Dict[str, Dict[str, Dict[str, Any]]] = {}
             cls._instance._external_req_id = 1
             cls._instance.last_broadcast_time = 0
             cls._instance.broadcast_interval = 0.05  # 50ms for near-real-time book updates
@@ -180,9 +186,12 @@ class DataAggregator:
         self.external_metrics.clear()
         self._binance_external_subs.clear()
         self._coinbase_external_subs.clear()
+        self._okx_external_subs.clear()
         self._binance_external_blocklist.clear()
         self._coinbase_external_blocklist.clear()
+        self._okx_external_blocklist.clear()
         self._binance_external_pending.clear()
+        self.wall_persistence.clear()
 
         logger.info("Data Aggregator: Offline")
 
@@ -451,7 +460,18 @@ class DataAggregator:
                 return
 
             self._update_cache(symbol, "book", levels)
-            self._update_cache(symbol, "walls", self._detect_walls(levels))
+            imbalance, _imbalance_ratio = self._compute_orderbook_imbalance(levels)
+            self._update_cache(symbol, "orderbook_imbalance", imbalance)
+            self._enqueue_alpha_update(
+                symbol,
+                {
+                    "orderbook_bids": [(float(l["px"]), float(l["sz"])) for l in levels[0][:25]],
+                    "orderbook_asks": [(float(l["px"]), float(l["sz"])) for l in levels[1][:25]],
+                    "orderbook_imbalance": imbalance,
+                    "_debug_book_count": len(levels[0]) + len(levels[1]),
+                },
+            )
+            self._update_cache(symbol, "walls", self._detect_walls(symbol, levels))
             logger.info(
                 "Hydrated l2 snapshot symbol=%s bids=%s asks=%s",
                 symbol,
@@ -470,6 +490,36 @@ class DataAggregator:
             else:
                 break
         return baseline
+
+    @staticmethod
+    def _compute_orderbook_imbalance(levels: List[List[Dict[str, Any]]], top_n: int = 25) -> Tuple[float, float]:
+        if not (isinstance(levels, list) and len(levels) >= 2):
+            return 0.0, 1.0
+        bids = levels[0][:top_n] if isinstance(levels[0], list) else []
+        asks = levels[1][:top_n] if isinstance(levels[1], list) else []
+        if not bids or not asks:
+            return 0.0, 1.0
+
+        bid_notional = 0.0
+        ask_notional = 0.0
+        for lvl in bids:
+            try:
+                bid_notional += max(0.0, float(lvl.get("px", 0.0)) * float(lvl.get("sz", 0.0)))
+            except Exception:
+                continue
+        for lvl in asks:
+            try:
+                ask_notional += max(0.0, float(lvl.get("px", 0.0)) * float(lvl.get("sz", 0.0)))
+            except Exception:
+                continue
+
+        denom = bid_notional + ask_notional
+        if denom <= 1e-9:
+            return 0.0, 1.0
+
+        signed = max(-0.999, min(0.999, (bid_notional - ask_notional) / denom))
+        ratio = max(0.01, (bid_notional + 1e-9) / (ask_notional + 1e-9))
+        return float(signed), float(ratio)
 
     def _is_fresh(self, ts_ms: Optional[int], now_ms: Optional[int] = None) -> bool:
         if not ts_ms:
@@ -493,6 +543,12 @@ class DataAggregator:
                 "cb_spot_1m": 0.0,
                 "cb_spot_5m": 0.0,
                 "cb_spot_ts": 0,
+                "okx_spot_last_id": None,
+                "okx_spot_cum": 0.0,
+                "okx_spot_series": [],
+                "okx_spot_1m": 0.0,
+                "okx_spot_5m": 0.0,
+                "okx_spot_ts": 0,
                 "bin_perp_oi_usd": 0.0,
                 "bin_perp_oi_ts": 0,
             },
@@ -528,6 +584,20 @@ class DataAggregator:
         base, _quote = product.split("-", 1)
         return DataAggregator._normalize_symbol(base)
 
+    @staticmethod
+    def _okx_inst_for_symbol(symbol: str) -> str:
+        return f"{symbol}-USDT"
+
+    @staticmethod
+    def _symbol_from_okx_inst(raw_inst: Any) -> Optional[str]:
+        if not isinstance(raw_inst, str):
+            return None
+        inst = raw_inst.strip().upper()
+        if "-" not in inst:
+            return None
+        base, _quote = inst.split("-", 1)
+        return DataAggregator._normalize_symbol(base)
+
     def _next_external_req_id(self) -> int:
         req_id = self._external_req_id
         self._external_req_id += 1
@@ -547,7 +617,14 @@ class DataAggregator:
         include_oi: bool = True,
     ):
         if symbol not in self.data_cache:
-            self.data_cache[symbol] = {"price": 0, "book": [[], []], "trades": [], "walls": [], "liquidations": []}
+            self.data_cache[symbol] = {
+                "price": 0,
+                "book": [[], []],
+                "trades": [],
+                "walls": [],
+                "liquidations": [],
+                "orderbook_imbalance": 0.0,
+            }
 
         if include_cvd:
             ext_cvd = self._build_external_cvd_payload(symbol, now_ms=now_ms)
@@ -570,6 +647,24 @@ class DataAggregator:
                 return await resp.json()
         except Exception:
             return None
+
+    def _append_spot_cvd_series(self, metrics: Dict[str, Any], prefix: str, now_ms: int):
+        cum_key = f"{prefix}_spot_cum"
+        series_key = f"{prefix}_spot_series"
+        one_key = f"{prefix}_spot_1m"
+        five_key = f"{prefix}_spot_5m"
+        ts_key = f"{prefix}_spot_ts"
+
+        series = metrics.setdefault(series_key, [])
+        series.append((now_ms, float(metrics.get(cum_key, 0.0))))
+        cutoff = now_ms - 6 * 60 * 1000
+        while len(series) > 1 and series[0][0] < cutoff:
+            series.pop(0)
+        baseline_1m = self._series_baseline(series, now_ms - 60 * 1000)
+        baseline_5m = self._series_baseline(series, now_ms - 5 * 60 * 1000)
+        metrics[one_key] = float(metrics.get(cum_key, 0.0) - baseline_1m)
+        metrics[five_key] = float(metrics.get(cum_key, 0.0) - baseline_5m)
+        metrics[ts_key] = now_ms
 
     def _apply_binance_spot_cvd(self, symbol: str, payload: Any, now_ms: int):
         if not isinstance(payload, list) or not payload:
@@ -599,15 +694,7 @@ class DataAggregator:
             metrics["bin_spot_cum"] = float(delta)
         else:
             metrics["bin_spot_cum"] = float(metrics.get("bin_spot_cum", 0.0) + delta)
-
-        series = metrics.setdefault("bin_spot_series", [])
-        series.append((now_ms, float(metrics["bin_spot_cum"])))
-        cutoff = now_ms - 6 * 60 * 1000
-        while len(series) > 1 and series[0][0] < cutoff:
-            series.pop(0)
-        metrics["bin_spot_1m"] = float(metrics["bin_spot_cum"] - self._series_baseline(series, now_ms - 60 * 1000))
-        metrics["bin_spot_5m"] = float(metrics["bin_spot_cum"] - self._series_baseline(series, now_ms - 5 * 60 * 1000))
-        metrics["bin_spot_ts"] = now_ms
+        self._append_spot_cvd_series(metrics, "bin", now_ms)
 
     def _apply_coinbase_spot_cvd(self, symbol: str, payload: Any, now_ms: int):
         if not isinstance(payload, list) or not payload:
@@ -638,15 +725,51 @@ class DataAggregator:
             metrics["cb_spot_cum"] = float(delta)
         else:
             metrics["cb_spot_cum"] = float(metrics.get("cb_spot_cum", 0.0) + delta)
+        self._append_spot_cvd_series(metrics, "cb", now_ms)
 
-        series = metrics.setdefault("cb_spot_series", [])
-        series.append((now_ms, float(metrics["cb_spot_cum"])))
-        cutoff = now_ms - 6 * 60 * 1000
-        while len(series) > 1 and series[0][0] < cutoff:
-            series.pop(0)
-        metrics["cb_spot_1m"] = float(metrics["cb_spot_cum"] - self._series_baseline(series, now_ms - 60 * 1000))
-        metrics["cb_spot_5m"] = float(metrics["cb_spot_cum"] - self._series_baseline(series, now_ms - 5 * 60 * 1000))
-        metrics["cb_spot_ts"] = now_ms
+    def _apply_okx_spot_cvd(self, symbol: str, payload: Any, now_ms: int):
+        if not isinstance(payload, list) or not payload:
+            return
+        metrics = self._ensure_external_symbol(symbol)
+        parsed: List[Tuple[int, float]] = []
+        for idx, row in enumerate(payload):
+            try:
+                raw_trade_id = row.get("trade_id")
+                if raw_trade_id is None:
+                    raw_trade_id = row.get("tradeId")
+                if raw_trade_id is None:
+                    raw_trade_id = row.get("ts")
+                trade_id = int(str(raw_trade_id))
+                price = float(row.get("price", 0.0))
+                size = float(row.get("size", 0.0))
+                side = str(row.get("side", "")).lower()
+                sign = 1.0 if side == "buy" else -1.0
+                parsed.append((trade_id, sign * price * size))
+            except Exception:
+                try:
+                    fallback_id = int(now_ms * 1000 + idx)
+                    price = float(row.get("price", 0.0))
+                    size = float(row.get("size", 0.0))
+                    side = str(row.get("side", "")).lower()
+                    sign = 1.0 if side == "buy" else -1.0
+                    parsed.append((fallback_id, sign * price * size))
+                except Exception:
+                    continue
+        if not parsed:
+            return
+
+        parsed.sort(key=lambda x: x[0])
+        prev_id = metrics.get("okx_spot_last_id")
+        if prev_id is None:
+            delta = sum(v for _, v in parsed)
+        else:
+            delta = sum(v for tid, v in parsed if tid > prev_id)
+        metrics["okx_spot_last_id"] = parsed[-1][0]
+        if prev_id is None:
+            metrics["okx_spot_cum"] = float(delta)
+        else:
+            metrics["okx_spot_cum"] = float(metrics.get("okx_spot_cum", 0.0) + delta)
+        self._append_spot_cvd_series(metrics, "okx", now_ms)
 
     def _apply_binance_perp_oi(self, symbol: str, payload: Any, now_ms: int):
         if not isinstance(payload, dict):
@@ -655,15 +778,19 @@ class DataAggregator:
             oi_contracts = float(payload.get("openInterest", 0.0))
         except Exception:
             return
+        if oi_contracts <= 0:
+            return
         metrics = self._ensure_external_symbol(symbol)
-        ref_price = float(self.data_cache.get(symbol, {}).get("price", 0.0) or 0.0)
-        oi_usd = oi_contracts * ref_price if ref_price > 0 else oi_contracts
+        ref_price = self._reference_price(symbol)
+        if ref_price <= 0:
+            return
+        oi_usd = oi_contracts * ref_price
         metrics["bin_perp_oi_usd"] = float(oi_usd)
         metrics["bin_perp_oi_ts"] = now_ms
 
-    def _compose_open_interest(self, hl_oi: Optional[float], binance_oi: Optional[float]) -> Tuple[float, str]:
-        hl = float(hl_oi or 0.0)
-        bn = float(binance_oi or 0.0)
+    def _compose_open_interest(self, hl_oi_usd: Optional[float], binance_oi_usd: Optional[float]) -> Tuple[float, str]:
+        hl = float(hl_oi_usd or 0.0)
+        bn = float(binance_oi_usd or 0.0)
         if hl > 0 and bn > 0:
             total_w = self.oi_weight_hl + self.oi_weight_binance
             if total_w <= 0:
@@ -675,6 +802,29 @@ class DataAggregator:
             return bn, "binance_perp"
         return 0.0, "none"
 
+    def _reference_price(self, symbol: str) -> float:
+        direct = float(self.data_cache.get(symbol, {}).get("price", 0.0) or 0.0)
+        if direct > 0:
+            return direct
+        for row in self.available_symbols_cache:
+            try:
+                if str(row.get("symbol", "")).upper() == symbol:
+                    ref = float(row.get("prev_day_px", 0.0) or 0.0)
+                    if ref > 0:
+                        return ref
+            except Exception:
+                continue
+        return 0.0
+
+    def _hl_open_interest_notional(self, symbol: str, hl_oi_contracts: float) -> float:
+        contracts = float(hl_oi_contracts or 0.0)
+        if contracts <= 0:
+            return 0.0
+        ref_price = self._reference_price(symbol)
+        if ref_price > 0:
+            return contracts * ref_price
+        return 0.0
+
     def _build_external_cvd_payload(self, symbol: str, now_ms: Optional[int] = None) -> Dict[str, Any]:
         metrics = self.external_metrics.get(symbol)
         if not metrics:
@@ -684,12 +834,16 @@ class DataAggregator:
 
         bin_ok = self._is_fresh(metrics.get("bin_spot_ts"), current)
         cb_ok = self._is_fresh(metrics.get("cb_spot_ts"), current)
+        okx_ok = self._is_fresh(metrics.get("okx_spot_ts"), current)
         if bin_ok:
             payload["cvd_spot_binance_1m"] = float(metrics.get("bin_spot_1m", 0.0))
             payload["cvd_spot_binance_5m"] = float(metrics.get("bin_spot_5m", 0.0))
         if cb_ok:
             payload["cvd_spot_coinbase_1m"] = float(metrics.get("cb_spot_1m", 0.0))
             payload["cvd_spot_coinbase_5m"] = float(metrics.get("cb_spot_5m", 0.0))
+        if okx_ok:
+            payload["cvd_spot_okx_1m"] = float(metrics.get("okx_spot_1m", 0.0))
+            payload["cvd_spot_okx_5m"] = float(metrics.get("okx_spot_5m", 0.0))
 
         weighted_1m = 0.0
         weighted_5m = 0.0
@@ -702,6 +856,10 @@ class DataAggregator:
             weighted_1m += float(metrics.get("cb_spot_1m", 0.0)) * self.cvd_weight_coinbase
             weighted_5m += float(metrics.get("cb_spot_5m", 0.0)) * self.cvd_weight_coinbase
             total_w += self.cvd_weight_coinbase
+        if okx_ok:
+            weighted_1m += float(metrics.get("okx_spot_1m", 0.0)) * self.cvd_weight_okx
+            weighted_5m += float(metrics.get("okx_spot_5m", 0.0)) * self.cvd_weight_okx
+            total_w += self.cvd_weight_okx
 
         if total_w > 0:
             payload["cvd_spot_composite_1m"] = weighted_1m / total_w
@@ -712,21 +870,26 @@ class DataAggregator:
     def _build_external_oi_payload(self, symbol: str, hl_oi: float, now_ms: Optional[int] = None) -> Dict[str, Any]:
         metrics = self.external_metrics.get(symbol) or {}
         current = now_ms if now_ms is not None else int(time.time() * 1000)
-        binance_oi = None
+        binance_oi_usd = None
         if self._is_fresh(metrics.get("bin_perp_oi_ts"), current):
             try:
-                binance_oi = float(metrics.get("bin_perp_oi_usd", 0.0))
+                binance_oi_usd = float(metrics.get("bin_perp_oi_usd", 0.0))
             except Exception:
-                binance_oi = None
+                binance_oi_usd = None
 
-        composed_oi, source = self._compose_open_interest(hl_oi, binance_oi)
+        hl_oi_contracts = float(hl_oi or 0.0)
+        ref_price = self._reference_price(symbol)
+        hl_oi_usd = self._hl_open_interest_notional(symbol, hl_oi_contracts)
+        composed_oi, source = self._compose_open_interest(hl_oi_usd, binance_oi_usd)
         payload: Dict[str, Any] = {
-            "open_interest_hl": float(hl_oi or 0.0),
+            "open_interest_hl": float(hl_oi_usd),
+            "open_interest_hl_contracts": float(hl_oi_contracts),
             "open_interest": float(composed_oi),
             "open_interest_source": source,
+            "open_interest_ref_price": float(ref_price),
         }
-        if binance_oi is not None:
-            payload["open_interest_binance_perp"] = float(binance_oi)
+        if binance_oi_usd is not None:
+            payload["open_interest_binance_perp"] = float(binance_oi_usd)
         return payload
 
     async def _external_ws_send_json(
@@ -801,6 +964,33 @@ class DataAggregator:
                 return False
 
         self._coinbase_external_subs = targets
+        return True
+
+    async def _sync_okx_ws_subscriptions(self, ws: aiohttp.ClientWebSocketResponse) -> bool:
+        target_symbols = [s for s in self._current_external_symbols() if s not in self._okx_external_blocklist]
+        targets = {self._okx_inst_for_symbol(symbol) for symbol in target_symbols}
+        to_sub = sorted(targets - self._okx_external_subs)
+        to_unsub = sorted(self._okx_external_subs - targets)
+
+        for inst in to_sub:
+            sent = await self._external_ws_send_json(
+                ws,
+                {"op": "subscribe", "args": [{"channel": "trades", "instId": inst}]},
+                context=f"okx:subscribe:{inst}",
+            )
+            if not sent:
+                return False
+
+        for inst in to_unsub:
+            sent = await self._external_ws_send_json(
+                ws,
+                {"op": "unsubscribe", "args": [{"channel": "trades", "instId": inst}]},
+                context=f"okx:unsubscribe:{inst}",
+            )
+            if not sent:
+                return False
+
+        self._okx_external_subs = targets
         return True
 
     def _handle_binance_external_message(self, raw: str):
@@ -918,6 +1108,65 @@ class DataAggregator:
             ],
             now_ms,
         )
+        self._emit_external_payloads(symbol, now_ms=now_ms, include_cvd=True, include_oi=False)
+
+    def _handle_okx_external_message(self, raw: str):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(data, dict):
+            return
+
+        event = str(data.get("event", "")).lower()
+        if event in {"subscribe", "unsubscribe"}:
+            return
+        if event == "error":
+            blocked_inst = None
+            arg = data.get("arg")
+            if isinstance(arg, dict):
+                blocked_inst = arg.get("instId")
+            if not isinstance(blocked_inst, str):
+                msg_text = str(data.get("msg", "")) + " " + str(data.get("message", ""))
+                found = re.findall(r"[A-Z0-9]{1,20}-USDT", msg_text.upper())
+                blocked_inst = found[0] if found else None
+            symbol = self._symbol_from_okx_inst(blocked_inst)
+            if symbol:
+                self._okx_external_blocklist.add(symbol)
+                self._okx_external_subs.discard(self._okx_inst_for_symbol(symbol))
+                logger.warning("External OKX product blocked symbol=%s inst=%s", symbol, blocked_inst)
+            logger.warning("OKX WS error payload=%s", data)
+            return
+
+        arg = data.get("arg")
+        if not isinstance(arg, dict):
+            return
+        if str(arg.get("channel", "")).lower() != "trades":
+            return
+
+        inst_id = arg.get("instId")
+        symbol = self._symbol_from_okx_inst(inst_id)
+        rows = data.get("data")
+        if not symbol or not isinstance(rows, list) or not rows:
+            return
+
+        transformed: List[Dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            transformed.append(
+                {
+                    "trade_id": row.get("tradeId") or row.get("trade_id") or row.get("ts"),
+                    "price": row.get("px") or row.get("price"),
+                    "size": row.get("sz") or row.get("size"),
+                    "side": row.get("side"),
+                }
+            )
+        if not transformed:
+            return
+
+        now_ms = int(time.time() * 1000)
+        self._apply_okx_spot_cvd(symbol, transformed, now_ms)
         self._emit_external_payloads(symbol, now_ms=now_ms, include_cvd=True, include_oi=False)
 
     async def _refresh_binance_oi_symbol(self, session: aiohttp.ClientSession, symbol: str):
@@ -1072,6 +1321,72 @@ class DataAggregator:
                 break
             await asyncio.sleep(reconnect_delay + random.uniform(0.1, 0.8))
 
+    async def _okx_ws_loop(self):
+        url = "wss://ws.okx.com:8443/ws/v5/public"
+        reconnect_delay = self.external_reconnect_min_sec
+        logger.info("External OKX WS loop started url=%s", url)
+        while self.is_running and self.external_enabled:
+            targets = self._current_external_symbols()
+            if not targets:
+                self._okx_external_subs.clear()
+                await asyncio.sleep(1.0)
+                continue
+            connected_at: Optional[float] = None
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(url, heartbeat=20) as ws:
+                        connected_at = time.time()
+                        reconnect_delay = self.external_reconnect_min_sec
+                        self._okx_external_subs = set()
+                        logger.info("External OKX WS connected symbols=%s", len(targets))
+                        last_sync = 0.0
+                        while self.is_running and self.external_enabled and not ws.closed:
+                            now = time.time()
+                            if now - last_sync >= self.external_ws_resync_sec:
+                                synced = await self._sync_okx_ws_subscriptions(ws)
+                                if not synced:
+                                    break
+                                last_sync = now
+
+                            try:
+                                msg = await asyncio.wait_for(ws.receive(), timeout=1.0)
+                            except asyncio.TimeoutError:
+                                continue
+
+                            if msg.type == WSMsgType.TEXT:
+                                self._handle_okx_external_message(msg.data)
+                            elif msg.type == WSMsgType.ERROR:
+                                ws_exc = ws.exception()
+                                if ws_exc is not None and not self._is_expected_ws_shutdown_error(ws_exc):
+                                    logger.warning("External OKX WS error=%s", self._format_exception(ws_exc))
+                                break
+                            elif msg.type in {WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.CLOSING}:
+                                break
+                        uptime = (time.time() - connected_at) if connected_at else 0.0
+                        if uptime >= self.stable_connection_sec:
+                            reconnect_delay = self.external_reconnect_min_sec
+                        else:
+                            reconnect_delay = min(
+                                self.external_reconnect_max_sec,
+                                max(self.external_reconnect_min_sec + 0.5, reconnect_delay * 1.6),
+                            )
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                reconnect_delay = min(
+                    self.external_reconnect_max_sec,
+                    max(self.external_reconnect_min_sec + 0.5, reconnect_delay * 1.6),
+                )
+                logger.warning(
+                    "External OKX WS reconnect err=%s reconnect_in=%.1fs",
+                    self._format_exception(exc),
+                    reconnect_delay,
+                )
+
+            if not self.is_running or not self.external_enabled:
+                break
+            await asyncio.sleep(reconnect_delay + random.uniform(0.1, 0.8))
+
     async def _binance_oi_loop(self):
         logger.info(
             "External Binance OI loop started poll_sec=%.2f max_symbols=%s",
@@ -1111,6 +1426,7 @@ class DataAggregator:
         tasks = [
             asyncio.create_task(self._binance_ws_loop()),
             asyncio.create_task(self._coinbase_ws_loop()),
+            asyncio.create_task(self._okx_ws_loop()),
             asyncio.create_task(self._binance_oi_loop()),
         ]
         try:
@@ -1124,6 +1440,7 @@ class DataAggregator:
         finally:
             self._binance_external_subs.clear()
             self._coinbase_external_subs.clear()
+            self._okx_external_subs.clear()
             self._binance_external_pending.clear()
 
     async def _ws_loop(self):
@@ -1285,16 +1602,19 @@ class DataAggregator:
             logger.debug("Received l2Book for %s", coin)
             levels = data.get("levels")
             if levels and len(levels) >= 2:
+                imbalance, _imbalance_ratio = self._compute_orderbook_imbalance(levels)
                 self._update_cache(coin, "book", levels)
+                self._update_cache(coin, "orderbook_imbalance", imbalance)
                 self._enqueue_alpha_update(
                     coin,
                     {
                         "orderbook_bids": [(float(l["px"]), float(l["sz"])) for l in levels[0][:25]],
                         "orderbook_asks": [(float(l["px"]), float(l["sz"])) for l in levels[1][:25]],
+                        "orderbook_imbalance": imbalance,
                         "_debug_book_count": len(levels[0]) + len(levels[1]),
                     },
                 )
-                self._update_cache(coin, "walls", self._detect_walls(levels))
+                self._update_cache(coin, "walls", self._detect_walls(coin, levels))
 
         elif channel == "trades" and isinstance(data, list) and data:
             for t in data:
@@ -1362,7 +1682,14 @@ class DataAggregator:
             logger.info(f"=== AGGREGATOR LIQUIDATION: {coin} px={px} sz={sz} side={side} ===")
             self._enqueue_alpha_update(coin, {"liquidation_event": liq_obj})
             if coin not in self.data_cache:
-                self.data_cache[coin] = {"price": 0, "book": [[], []], "trades": [], "walls": [], "liquidations": []}
+                self.data_cache[coin] = {
+                    "price": 0,
+                    "book": [[], []],
+                    "trades": [],
+                    "walls": [],
+                    "liquidations": [],
+                    "orderbook_imbalance": 0.0,
+                }
             history = self.data_cache[coin].get("liquidations", [])
             history.insert(
                 0,
@@ -1378,7 +1705,14 @@ class DataAggregator:
 
     def _update_cache(self, coin: str, key: str, value: Any):
         if coin not in self.data_cache:
-            self.data_cache[coin] = {"price": 0, "book": [[], []], "trades": [], "walls": [], "liquidations": []}
+            self.data_cache[coin] = {
+                "price": 0,
+                "book": [[], []],
+                "trades": [],
+                "walls": [],
+                "liquidations": [],
+                "orderbook_imbalance": 0.0,
+            }
 
         now_ms = int(time.time() * 1000)
         if key == "book" and isinstance(value, list) and len(value) >= 2:
@@ -1392,21 +1726,115 @@ class DataAggregator:
             self.data_cache[coin]["price_ts"] = now_ms
             self._enqueue_alpha_update(coin, {"price": value, "timestamp": int(time.time() * 1000)})
 
-    def _detect_walls(self, levels: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        walls = []
+    @staticmethod
+    def _wall_price_bucket(px: float) -> float:
+        val = abs(float(px))
+        if val >= 10_000:
+            return round(px, 1)
+        if val >= 1_000:
+            return round(px, 2)
+        if val >= 100:
+            return round(px, 3)
+        if val >= 1:
+            return round(px, 4)
+        return round(px, 6)
+
+    def _detect_walls(self, symbol: str, levels: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        walls: List[Dict[str, Any]] = []
+        now_ms = int(time.time() * 1000)
+        per_symbol = self.wall_persistence.setdefault(symbol, {})
         try:
-            bids, asks = levels[0][:20], levels[1][:20]
-            avg = sum(float(l["sz"]) for l in (bids + asks)) / len(bids + asks)
-            for i, side_l in enumerate([bids, asks]):
-                side = "bid" if i == 0 else "ask"
-                for l in side_l:
-                    sz = float(l["sz"])
-                    if sz > avg * 15:
-                        walls.append({"px": l["px"], "sz": l["sz"], "side": side, "strength": "massive"})
-                    elif sz > avg * 8:
-                        walls.append({"px": l["px"], "sz": l["sz"], "side": side, "strength": "major"})
+            if not (isinstance(levels, list) and len(levels) >= 2):
+                return []
+            bids = levels[0][:30] if isinstance(levels[0], list) else []
+            asks = levels[1][:30] if isinstance(levels[1], list) else []
+            if not bids and not asks:
+                return []
+
+            candidates: Dict[str, Dict[str, Any]] = {}
+            for side, rows in (("bid", bids), ("ask", asks)):
+                parsed: List[Tuple[float, float]] = []
+                for row in rows:
+                    try:
+                        px = float(row.get("px", 0.0))
+                        sz = float(row.get("sz", 0.0))
+                    except Exception:
+                        continue
+                    if px <= 0 or sz <= 0:
+                        continue
+                    parsed.append((px, sz))
+                if not parsed:
+                    continue
+
+                avg_sz = sum(sz for _px, sz in parsed) / max(1, len(parsed))
+                if avg_sz <= 0:
+                    continue
+
+                for px, sz in parsed:
+                    ratio = sz / (avg_sz + 1e-9)
+                    if ratio < 7.0:
+                        continue
+                    bucket = self._wall_price_bucket(px)
+                    key = f"{side}:{bucket}"
+                    score = ratio * (1.15 if ratio >= 14.0 else 1.0)
+                    prev = candidates.get(key)
+                    if prev is None or score > prev.get("score", 0.0):
+                        candidates[key] = {
+                            "side": side,
+                            "px": px,
+                            "sz": sz,
+                            "ratio": ratio,
+                            "score": score,
+                        }
+
+            seen_keys: Set[str] = set()
+            for key, candidate in candidates.items():
+                seen_keys.add(key)
+                prev = per_symbol.get(key)
+                if prev and (now_ms - int(prev.get("last_seen", 0))) <= self.wall_persist_keep_ms:
+                    hits = int(prev.get("hits", 0)) + 1
+                    first_seen = int(prev.get("first_seen", now_ms))
+                else:
+                    hits = 1
+                    first_seen = now_ms
+                per_symbol[key] = {
+                    **candidate,
+                    "hits": hits,
+                    "first_seen": first_seen,
+                    "last_seen": now_ms,
+                }
+
+            for key in list(per_symbol.keys()):
+                entry = per_symbol.get(key) or {}
+                last_seen = int(entry.get("last_seen", 0))
+                if now_ms - last_seen > self.wall_persist_keep_ms:
+                    per_symbol.pop(key, None)
+
+            for key in seen_keys:
+                entry = per_symbol.get(key)
+                if not entry:
+                    continue
+                hits = int(entry.get("hits", 0))
+                ratio = float(entry.get("ratio", 0.0))
+                if hits < self.wall_confirm_hits and ratio < 14.0:
+                    continue
+                persistence = min(1.0, hits / max(1, self.wall_confirm_hits))
+                score = ratio * (1.0 + persistence)
+                strength = "massive" if ratio >= 14.0 or hits >= (self.wall_confirm_hits + 2) else "major"
+                walls.append(
+                    {
+                        "px": f"{entry.get('px', 0.0)}",
+                        "sz": f"{entry.get('sz', 0.0)}",
+                        "side": entry.get("side", "bid"),
+                        "strength": strength,
+                        "score": round(score, 2),
+                        "hits": hits,
+                        "persist_ms": max(0, now_ms - int(entry.get("first_seen", now_ms))),
+                    }
+                )
         except Exception:
-            logger.exception("Failed wall detection for levels snapshot")
+            logger.exception("Failed wall detection for levels snapshot symbol=%s", symbol)
+        walls.sort(key=lambda row: float(row.get("score", 0.0)), reverse=True)
         return walls[:8]
 
     async def _broadcast_loop(self):
@@ -1511,6 +1939,7 @@ class DataAggregator:
         self.data_cache.pop(symbol, None)
         self.cvd_data.pop(symbol, None)
         self.external_metrics.pop(symbol, None)
+        self.wall_persistence.pop(symbol, None)
         logger.info("Unsubscribed symbol=%s total=%s", symbol, len(self.subscriptions))
 
         if self._ws is not None and not self._ws.closed:

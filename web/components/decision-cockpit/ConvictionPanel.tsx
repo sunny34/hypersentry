@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAlphaStore } from '../../store/useAlphaStore';
 import { useMarketStore } from '../../store/useMarketStore';
+import { useAlphaDiagnostics } from '../../hooks/useAlphaDiagnostics';
 
 const ConvictionPanel = ({ symbol }: { symbol: string }) => {
     const conviction = useAlphaStore((s) => s.convictions[symbol]);
@@ -11,6 +12,7 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
     const stream = useAlphaStore((s) => s.stream);
     const market = useMarketStore((s) => s.marketData[symbol]);
     const [now, setNow] = useState(() => Date.now());
+    const { data: diag, error: diagError } = useAlphaDiagnostics(symbol, 2500);
 
     useEffect(() => {
         const id = setInterval(() => setNow(Date.now()), 1000);
@@ -96,6 +98,16 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
                 ? 'text-red-500'
                 : 'text-gray-500';
     const probUpPct = Math.max(0, Math.min(100, conviction.prob_up_1pct * 100));
+    const diagBiasClass = diag?.collective_bias === 'LONG'
+        ? 'text-emerald-400'
+        : diag?.collective_bias === 'SHORT'
+            ? 'text-red-400'
+            : 'text-gray-300';
+    const diagBar = diag ? Math.max(0, Math.min(100, (diag.collective_raw + 1) * 50)) : 50;
+    const topComponents = diag
+        ? Object.values(diag.components || {}).sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution)).slice(0, 3)
+        : [];
+    const diagReasons = (diag?.reasoning || []).slice(0, 3);
 
     return (
         <div className="relative w-full border border-gray-800 bg-black overflow-hidden flex flex-col min-h-[400px] sm:min-h-[450px] p-4 sm:p-6 lg:p-8 gap-5 sm:gap-7">
@@ -140,6 +152,61 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
                         <>{info.detail}. System recommends <span className="text-gray-500">waiting for asymmetry</span>.</>
                     )}
                 </div>
+            </div>
+
+            <div className="z-10 bg-gray-950/70 border border-gray-800 p-4 rounded-sm">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <div className="text-gray-500 text-[10px] uppercase tracking-widest font-bold">Collective Score</div>
+                        <div className="text-[11px] text-gray-600 mt-1 uppercase">
+                            OI + CVD + Book + Walls + Funding
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <div className={`text-2xl font-black ${diagBiasClass}`}>{diag?.collective_score ?? '--'}</div>
+                        <div className={`text-[10px] font-bold uppercase ${diagBiasClass}`}>{diag?.collective_bias || 'NEUTRAL'}</div>
+                    </div>
+                </div>
+                <div className="mt-3 h-1.5 w-full bg-gray-900 rounded-full overflow-hidden">
+                    <div
+                        className={`h-full transition-all duration-500 ${diag?.collective_bias === 'LONG' ? 'bg-emerald-500' : diag?.collective_bias === 'SHORT' ? 'bg-red-500' : 'bg-gray-500'}`}
+                        style={{ width: `${diagBar}%` }}
+                    />
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] uppercase text-gray-500">
+                    <div>Spread <span className="text-gray-300 font-bold">{diag?.metrics?.spread_bps?.toFixed(2) ?? '--'} bps</span></div>
+                    <div>Book <span className="text-gray-300 font-bold">{diag?.metrics?.orderbook_imbalance_signed?.toFixed(3) ?? '--'}</span></div>
+                    <div>OI Source <span className="text-gray-300 font-bold">{diag?.metrics?.open_interest_source || '--'}</span></div>
+                    <div>Walls <span className="text-gray-300 font-bold">{diag?.metrics?.wall_count ?? 0}</span></div>
+                </div>
+
+                {diagReasons.length > 0 && (
+                    <div className="mt-3 space-y-1.5">
+                        {diagReasons.map((reason, idx) => (
+                            <div key={`${reason}-${idx}`} className="text-[10px] text-gray-300">
+                                {reason}
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {topComponents.length > 0 && (
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                        {topComponents.map((component) => (
+                            <div key={component.label} className="border border-gray-800 bg-black/50 p-2">
+                                <div className="text-[9px] uppercase text-gray-600">{component.label}</div>
+                                <div className={`text-xs font-bold ${component.contribution >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {(component.contribution >= 0 ? '+' : '')}{component.contribution.toFixed(3)}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {diagError && (
+                    <div className="mt-2 text-[9px] text-yellow-500 uppercase">Diagnostics delayed</div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 z-10">

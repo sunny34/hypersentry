@@ -10,6 +10,14 @@ const SignalBreakdown = () => {
     const governance = useAlphaStore((s) => s.governance[activeSymbol]);
     const stream = useAlphaStore((s) => s.stream);
     const market = useMarketStore((s) => s.marketData[activeSymbol]);
+    const oiNotional = market?.external_oi?.open_interest ?? market?.oi ?? 0;
+    const oiSource = market?.external_oi?.open_interest_source ?? 'hl';
+    const oiContracts = market?.external_oi?.open_interest_hl_contracts ?? market?.oi ?? 0;
+    const bookSigned = Number(market?.orderbook_imbalance ?? 0);
+    const cvdBin = Number(market?.external_spot?.cvd_spot_binance_1m ?? 0);
+    const cvdCb = Number(market?.external_spot?.cvd_spot_coinbase_1m ?? 0);
+    const cvdOkx = Number(market?.external_spot?.cvd_spot_okx_1m ?? 0);
+    const cvdComp = Number(market?.external_spot?.cvd_spot_composite_1m ?? 0);
 
     const rows: Array<{ label: string; value: string; color?: string }> = conviction ? [
         { label: 'Symbol', value: activeSymbol, color: 'text-white' },
@@ -20,8 +28,14 @@ const SignalBreakdown = () => {
         { label: 'Expected Move', value: `${conviction.expected_move.toFixed(2)}%` },
         { label: 'Realized Vol', value: `${(conviction.realized_vol * 100).toFixed(2)}%` },
         { label: 'CVD (Venue)', value: formatCompact(market?.cvd ?? 0) },
-        { label: 'CVD (Spot 1m)', value: formatCompact(market?.external_spot?.cvd_spot_composite_1m ?? 0) },
-        { label: 'OI', value: formatCompact(market?.oi ?? market?.external_oi?.open_interest ?? 0) },
+        { label: 'CVD Spot Comp 1m', value: formatCompact(cvdComp) },
+        { label: 'CVD Binance 1m', value: formatCompact(cvdBin), color: cvdBin >= 0 ? 'text-emerald-500' : 'text-red-500' },
+        { label: 'CVD Coinbase 1m', value: formatCompact(cvdCb), color: cvdCb >= 0 ? 'text-emerald-500' : 'text-red-500' },
+        { label: 'CVD OKX 1m', value: formatCompact(cvdOkx), color: cvdOkx >= 0 ? 'text-emerald-500' : 'text-red-500' },
+        { label: 'OI (USD)', value: formatCompact(oiNotional) },
+        { label: 'OI Source', value: oiSource.toUpperCase() },
+        { label: 'HL OI Contracts', value: formatCompact(oiContracts) },
+        { label: 'Book Imbalance', value: bookSigned.toFixed(3), color: bookSigned > 0.05 ? 'text-emerald-500' : bookSigned < -0.05 ? 'text-red-500' : 'text-gray-400' },
         { label: 'Regime', value: governance?.active_regime || conviction.regime },
         { label: 'Health', value: governance?.calibration_status || 'UNKNOWN', color: governance?.calibration_status === 'OPTIMAL' ? 'text-emerald-500' : 'text-yellow-500' },
         { label: 'Stream', value: stream.status.toUpperCase(), color: stream.status === 'live' ? 'text-emerald-500' : stream.status === 'degraded' ? 'text-yellow-500' : 'text-red-500' }

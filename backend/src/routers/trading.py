@@ -162,8 +162,16 @@ async def get_trading_tokens(request: Request):
                     volume = float(row.get("day_ntl_vlm", 0) or 0)
                     prev_day_px = float(row.get("prev_day_px", 0) or 0)
                     change_24h = ((price - prev_day_px) / prev_day_px * 100.0) if prev_day_px > 0 else 0.0
-                    raw_oi = float(cache.get("oi", 0) or 0)
-                    oi_notional = raw_oi * price if price > 0 else raw_oi
+                    oi_notional = 0.0
+                    external_oi = cache.get("external_oi")
+                    if isinstance(external_oi, dict):
+                        try:
+                            oi_notional = float(external_oi.get("open_interest", 0) or 0)
+                        except Exception:
+                            oi_notional = 0.0
+                    if oi_notional <= 0:
+                        raw_oi = float(cache.get("oi", 0) or 0)
+                        oi_notional = raw_oi * price if price > 0 else raw_oi
                     tokens.append(
                         {
                             "symbol": symbol,
@@ -1465,7 +1473,7 @@ async def get_orderbook_snapshot(request: Request, coin: str = "BTC", depth: int
     if aggregator is not None:
         try:
             aggregator._update_cache(symbol, "book", levels)
-            aggregator._update_cache(symbol, "walls", aggregator._detect_walls(levels))
+            aggregator._update_cache(symbol, "walls", aggregator._detect_walls(symbol, levels))
         except Exception as exc:
             logger.warning("Failed to hydrate aggregator cache from snapshot symbol=%s err=%s", symbol, exc)
 

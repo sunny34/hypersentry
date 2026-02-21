@@ -371,10 +371,19 @@ async def get_market_summary(request: Request):
                 if not isinstance(payload, dict):
                     continue
                 px = float(payload.get("price", 0) or 0)
-                oi = float(payload.get("oi", 0) or 0)
+                oi_notional = 0.0
+                ext_oi = payload.get("external_oi")
+                if isinstance(ext_oi, dict):
+                    try:
+                        oi_notional = float(ext_oi.get("open_interest", 0) or 0)
+                    except Exception:
+                        oi_notional = 0.0
+                if oi_notional <= 0:
+                    oi = float(payload.get("oi", 0) or 0)
+                    oi_notional = (oi * px) if px > 0 else oi
                 funding = float(payload.get("funding", 0) or 0)
-                if oi > 0:
-                    total_oi += (oi * px) if px > 0 else oi
+                if oi_notional > 0:
+                    total_oi += oi_notional
                 total_volume += float(vol_by_symbol.get(symbol, 0) or 0)
                 if funding > 0.0001:
                     positive_funding_count += 1

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from dataclasses import asdict
 import logging
 import os
@@ -84,11 +84,22 @@ def _estimate_realized_vol_pct(symbol: str) -> float:
     return max(0.002, float(statistics.pstdev(returns)))
 
 
+def _orderbook_imbalance_to_ratio(raw_value: object) -> float:
+    try:
+        val = float(raw_value)
+    except Exception:
+        return 1.0
+    if abs(val) <= 1.0:
+        signed = max(-0.98, min(0.98, val))
+        return max(0.01, (1.0 + signed) / (1.0 - signed))
+    return max(0.01, val)
+
+
 def _market_microstructure_from_state(state) -> tuple[float, float, float]:
     bids = list(state.orderbook_bids or [])
     asks = list(state.orderbook_asks or [])
     if not bids or not asks:
-        imbalance = state.orderbook_imbalance if state.orderbook_imbalance else 1.0
+        imbalance = _orderbook_imbalance_to_ratio(state.orderbook_imbalance)
         return 100000.0, 10.0, max(0.01, float(imbalance))
 
     best_bid = float(bids[0][0])
@@ -103,8 +114,167 @@ def _market_microstructure_from_state(state) -> tuple[float, float, float]:
     ask_size = sum(max(0.0, float(sz)) for _, sz in asks[:top_n])
     imbalance = (bid_size + 1e-9) / (ask_size + 1e-9)
     if state.orderbook_imbalance:
-        imbalance = float(state.orderbook_imbalance)
+        imbalance = _orderbook_imbalance_to_ratio(state.orderbook_imbalance)
     return max(1000.0, liquidity), spread_bps, max(0.01, imbalance)
+
+
+def _clip(value: float, lo: float = -1.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, float(value)))
+
+
+def _orderbook_imbalance_to_signed(raw_value: object) -> float:
+    try:
+        val = float(raw_value)
+    except Exception:
+        return 0.0
+    if abs(val) <= 1.0:
+        return _clip(val)
+    ratio = max(0.01, val)
+    return _clip((ratio - 1.0) / (ratio + 1.0))
+
+
+def _collective_signal_payload(symbol: str, state, conviction, governance, walls: list[dict]) -> dict:
+    conviction_score = 0.0
+    conviction_reason = "Conviction unavailable."
+    if conviction is not None:
+        conviction_score = _clip((float(conviction.score) - 50.0) / 50.0)
+        conviction_reason = f"Conviction {conviction.bias} ({conviction.score}/100)."
+
+    cvd_raw = float(state.cvd_spot_composite_1m or state.cvd_1m or 0.0)
+    cvd_score = _clip(cvd_raw / 500_000.0)
+    cvd_reason = f"Spot CVD 1m {cvd_raw:+,.0f}."
+
+    oi = float(state.open_interest or 0.0)
+    oi_delta = float(state.oi_delta_1m or 0.0)
+    oi_ratio = (oi_delta / oi) if oi > 0 else 0.0
+    oi_momentum_score = _clip(oi_ratio * 160.0)
+    oi_reason = f"OI 1m {oi_delta:+,.0f} ({oi_ratio * 100:+.3f}%) via {state.open_interest_source or 'unknown'}."
+
+    book_signed = _orderbook_imbalance_to_signed(state.orderbook_imbalance)
+    book_ratio = _orderbook_imbalance_to_ratio(state.orderbook_imbalance)
+    book_reason = f"Book pressure {book_signed:+.3f} (ratio {book_ratio:.2f}x)."
+
+    bid_wall_score = 0.0
+    ask_wall_score = 0.0
+    top_wall = None
+    for wall in walls:
+        try:
+            side = str(wall.get("side", "")).lower()
+            score = float(wall.get("score", 0.0) or 0.0)
+            if score <= 0:
+                strength = str(wall.get("strength", "")).lower()
+                score = 2.0 if strength == "massive" else 1.0
+            if side == "bid":
+                bid_wall_score = max(bid_wall_score, score)
+            elif side == "ask":
+                ask_wall_score = max(ask_wall_score, score)
+            if top_wall is None or score > float(top_wall.get("score", 0.0) or 0.0):
+                top_wall = dict(wall)
+                top_wall["score"] = score
+        except Exception:
+            continue
+
+    wall_total = bid_wall_score + ask_wall_score
+    wall_score = _clip(((bid_wall_score - ask_wall_score) / wall_total) if wall_total > 0 else 0.0)
+    if top_wall:
+        wall_reason = (
+            f"Top wall {str(top_wall.get('side', '')).upper()} @ {top_wall.get('px')} "
+            f"(score {float(top_wall.get('score', 0.0)):.2f})."
+        )
+    else:
+        wall_reason = "No persistent walls detected."
+
+    funding = float(state.funding_rate or 0.0)
+    funding_score = _clip(-funding * 5_000.0)
+    funding_reason = f"Funding {funding:+.6f}."
+
+    components = {
+        "conviction": {
+            "label": "Conviction",
+            "score": conviction_score,
+            "weight": 0.35,
+            "reason": conviction_reason,
+        },
+        "spot_cvd": {
+            "label": "Spot CVD",
+            "score": cvd_score,
+            "weight": 0.20,
+            "reason": cvd_reason,
+        },
+        "oi_momentum": {
+            "label": "OI Momentum",
+            "score": oi_momentum_score,
+            "weight": 0.15,
+            "reason": oi_reason,
+        },
+        "book_pressure": {
+            "label": "Book Pressure",
+            "score": book_signed,
+            "weight": 0.15,
+            "reason": book_reason,
+        },
+        "wall_pressure": {
+            "label": "Wall Pressure",
+            "score": wall_score,
+            "weight": 0.10,
+            "reason": wall_reason,
+        },
+        "funding_pressure": {
+            "label": "Funding",
+            "score": funding_score,
+            "weight": 0.05,
+            "reason": funding_reason,
+        },
+    }
+
+    for comp in components.values():
+        comp["contribution"] = float(comp["score"]) * float(comp["weight"])
+
+    collective_raw = sum(float(comp["contribution"]) for comp in components.values())
+    collective_raw = _clip(collective_raw)
+    collective_score = int(round((collective_raw + 1.0) * 50.0))
+    collective_bias = "LONG" if collective_raw >= 0.15 else "SHORT" if collective_raw <= -0.15 else "NEUTRAL"
+    confidence = min(0.99, max(0.05, abs(collective_raw) * 1.25))
+
+    ranked = sorted(components.values(), key=lambda comp: abs(float(comp["contribution"])), reverse=True)
+    reasoning = [str(comp["reason"]) for comp in ranked[:4] if abs(float(comp["contribution"])) >= 0.02]
+    if not reasoning:
+        reasoning = ["Signals are balanced; no dominant edge yet."]
+
+    _liq_usd, spread_bps, _imb_ratio = _market_microstructure_from_state(state)
+    return {
+        "symbol": symbol,
+        "timestamp": int(time.time() * 1000),
+        "collective_score": collective_score,
+        "collective_raw": round(collective_raw, 4),
+        "collective_bias": collective_bias,
+        "confidence": round(confidence, 3),
+        "components": components,
+        "reasoning": reasoning,
+        "metrics": {
+            "price": float(state.price or 0.0),
+            "spread_bps": float(spread_bps),
+            "funding_rate": funding,
+            "open_interest": oi,
+            "open_interest_hl": float(state.open_interest_hl or 0.0),
+            "open_interest_hl_contracts": float(state.open_interest_hl_contracts or 0.0),
+            "open_interest_binance_perp": float(state.open_interest_binance_perp or 0.0),
+            "open_interest_source": state.open_interest_source or "unknown",
+            "oi_delta_1m": oi_delta,
+            "cvd_source": state.cvd_source or "unknown",
+            "cvd_1m": float(state.cvd_1m or 0.0),
+            "cvd_spot_composite_1m": float(state.cvd_spot_composite_1m or 0.0),
+            "cvd_spot_binance_1m": float(state.cvd_spot_binance_1m or 0.0),
+            "cvd_spot_coinbase_1m": float(state.cvd_spot_coinbase_1m or 0.0),
+            "cvd_spot_okx_1m": float(state.cvd_spot_okx_1m or 0.0),
+            "orderbook_imbalance_signed": float(book_signed),
+            "orderbook_imbalance_ratio": float(book_ratio),
+            "top_wall": top_wall,
+            "wall_count": len(walls),
+            "regime": getattr(governance, "active_regime", None),
+            "health": getattr(governance, "calibration_status", None),
+        },
+    }
 
 
 async def _build_live_risk(
@@ -412,9 +582,21 @@ async def get_alpha_state(symbol: str):
         "funding_rate": state.funding_rate,
         "open_interest": state.open_interest,
         "open_interest_hl": state.open_interest_hl,
+        "open_interest_hl_contracts": state.open_interest_hl_contracts,
+        "open_interest_binance_perp": state.open_interest_binance_perp,
+        "open_interest_ref_price": state.open_interest_ref_price,
+        "open_interest_source": state.open_interest_source,
         "cvd_1m": state.cvd_1m,
         "cvd_hl_1m": state.cvd_hl_1m,
+        "cvd_spot_binance_1m": state.cvd_spot_binance_1m,
+        "cvd_spot_binance_5m": state.cvd_spot_binance_5m,
+        "cvd_spot_coinbase_1m": state.cvd_spot_coinbase_1m,
+        "cvd_spot_coinbase_5m": state.cvd_spot_coinbase_5m,
+        "cvd_spot_okx_1m": state.cvd_spot_okx_1m,
+        "cvd_spot_okx_5m": state.cvd_spot_okx_5m,
         "cvd_spot_composite_1m": state.cvd_spot_composite_1m,
+        "cvd_spot_composite_5m": state.cvd_spot_composite_5m,
+        "cvd_source": state.cvd_source,
         "aggressive_buy_volume_1m": state.aggressive_buy_volume_1m,
         "aggressive_sell_volume_1m": state.aggressive_sell_volume_1m,
         "orderbook_imbalance": state.orderbook_imbalance,
@@ -455,6 +637,34 @@ async def get_alpha_debug(symbol: str):
         "governance": gov_service.get_health_report().model_dump() if gov_service else None,
         "probabilities": probs.model_dump() if probs else None
     }
+
+
+@router.get("/diag/{symbol}")
+async def get_alpha_diagnostics(symbol: str, request: Request):
+    """
+    Collective diagnostics payload for frontend operator visibility.
+    Combines conviction + OI/CVD + orderbook + wall pressure into one scored view.
+    """
+    symbol_upper = symbol.upper()
+    state = await global_state_store.get_state(symbol_upper)
+    if not state:
+        raise HTTPException(status_code=404, detail="Symbol not tracked")
+
+    conviction = await conviction_service.get_conviction(symbol_upper)
+    gov_service = await get_governance_service(symbol_upper)
+    governance = gov_service.get_health_report() if gov_service else None
+
+    walls: list[dict] = []
+    try:
+        aggregator = getattr(request.app.state, "aggregator", None)
+        cache = (getattr(aggregator, "data_cache", {}) or {}).get(symbol_upper, {}) if aggregator else {}
+        raw_walls = cache.get("walls", []) if isinstance(cache, dict) else []
+        if isinstance(raw_walls, list):
+            walls = [w for w in raw_walls if isinstance(w, dict)]
+    except Exception:
+        walls = []
+
+    return _collective_signal_payload(symbol_upper, state, conviction, governance, walls)
 
 
 # ============================================================
@@ -581,4 +791,3 @@ async def get_alpha_signals(symbol: str):
             detail=f"Alpha state for {symbol} not initialized or inactive."
         )
     return signal
-

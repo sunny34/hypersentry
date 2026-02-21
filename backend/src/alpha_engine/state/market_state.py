@@ -15,7 +15,9 @@ class MarketState:
     funding_rate: float = 0.0
     open_interest: float = 0.0
     open_interest_hl: float = 0.0
+    open_interest_hl_contracts: float = 0.0
     open_interest_binance_perp: float = 0.0
+    open_interest_ref_price: float = 0.0
     open_interest_source: str = "hl"
     
     # Deltas
@@ -29,6 +31,8 @@ class MarketState:
     cvd_spot_binance_5m: float = 0.0
     cvd_spot_coinbase_1m: float = 0.0
     cvd_spot_coinbase_5m: float = 0.0
+    cvd_spot_okx_1m: float = 0.0
+    cvd_spot_okx_5m: float = 0.0
     cvd_spot_composite_1m: float = 0.0
     cvd_spot_composite_5m: float = 0.0
     cvd_source: str = "hl"

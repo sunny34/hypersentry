@@ -6,6 +6,7 @@ import ModelHealthWidget from '../widgets/ModelHealthWidget';
 import KillSwitch from '../widgets/KillSwitch';
 import AuthControlPanel from '../widgets/AuthControlPanel';
 import SimpleSignalPanel from '../widgets/SimpleSignalPanel';
+import CollectiveScoreWidget from '../widgets/CollectiveScoreWidget';
 import { useAlphaStore } from '../../../store/useAlphaStore';
 
 const AutonomousLayout = () => {
@@ -91,6 +92,8 @@ const AutonomousLayout = () => {
                                 <span className="text-[10px] text-gray-500 uppercase">Active Plans</span>
                             </div>
                         </div>
+
+                        <CollectiveScoreWidget />
 
                         <div className="flex-1 border border-gray-800 bg-black p-4 text-[10px] font-mono uppercase border-dashed overflow-y-auto">
                             <div className="text-gray-500 mb-3">Live Signal Heatmap</div>
