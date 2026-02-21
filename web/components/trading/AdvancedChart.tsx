@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useRef, memo, useState, useCallback } from 'react';
+import { useEffect, useRef, memo, useState, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import axios from 'axios';
 import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw, Maximize2, Eye, EyeOff, Shield, Filter, Settings, Minimize2, ShieldAlert, Activity, BarChart3, Binary, Target, Zap, BrainCircuit } from 'lucide-react';
@@ -70,6 +70,13 @@ const derivePricePrecision = (candles: Array<{ open: number; high: number; low: 
     return clamp(precision, 2, MAX_PRICE_PRECISION);
 };
 
+const getIntervalMs = (interval: string): number => {
+    if (interval === 'D') return 24 * 60 * 60 * 1000;
+    const mins = Number.parseInt(interval, 10);
+    if (Number.isFinite(mins) && mins > 0) return mins * 60 * 1000;
+    return 15 * 60 * 1000;
+};
+
 function AdvancedChart({
     symbol,
     interval,
@@ -86,6 +93,10 @@ function AdvancedChart({
     positions = [],
     openOrders = []
 }: AdvancedChartProps) {
+    const normalizedSymbol = useMemo(
+        () => String(symbol || 'BTC').trim().split(/[/-]/)[0].toUpperCase(),
+        [symbol],
+    );
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -127,12 +138,14 @@ function AdvancedChart({
 
     // Context & Store
     const { status: wsStatus, subscribe, addListener } = useHyperliquidWS();
-    const marketData = useMarketStore(state => state.marketData[symbol]);
+    const marketData = useMarketStore(state => state.marketData[normalizedSymbol]);
 
     const lastCandleRef = useRef<any>(null);
     const pricePrecisionRef = useRef(DEFAULT_PRICE_PRECISION);
     const wallAgeRef = useRef<Map<string, number>>(new Map()); // ex-side-px -> firstSeenTimestamp
     const [persistenceScore, setPersistenceScore] = useState(0);
+    const hasInitialSnapshotRef = useRef(false);
+    const lastSnapshotSignatureRef = useRef('');
 
     const applyPricePrecision = useCallback((precision: number) => {
         const safePrecision = clamp(precision, 2, MAX_PRICE_PRECISION);
@@ -156,6 +169,64 @@ function AdvancedChart({
         });
     }, []);
 
+    const lastStateSyncMsRef = useRef(0);
+    const upsertRealtimeCandle = useCallback((price: number, eventMs: number) => {
+        if (!candlestickSeriesRef.current || !lastCandleRef.current) return;
+        if (!Number.isFinite(price) || price <= 0) return;
+
+        const intervalMs = getIntervalMs(interval);
+        const bucketStartSec = Math.floor(eventMs / intervalMs) * (intervalMs / 1000);
+        const current = lastCandleRef.current;
+        let nextCandle = current;
+        let openedNewBucket = false;
+
+        if ((current.time as number) === bucketStartSec) {
+            nextCandle = {
+                ...current,
+                close: price,
+                high: Math.max(Number(current.high || price), price),
+                low: Math.min(Number(current.low || price), price),
+            };
+        } else if ((current.time as number) < bucketStartSec) {
+            const open = Number(current.close || price);
+            nextCandle = {
+                time: bucketStartSec as UTCTimestamp,
+                open,
+                high: Math.max(open, price),
+                low: Math.min(open, price),
+                close: price,
+                volume: 0,
+            };
+            openedNewBucket = true;
+        } else {
+            return;
+        }
+
+        candlestickSeriesRef.current.update(nextCandle);
+        lastCandleRef.current = nextCandle;
+
+        const nowMs = Date.now();
+        const shouldSyncState = openedNewBucket || (nowMs - lastStateSyncMsRef.current >= 1_000);
+        if (!shouldSyncState) return;
+        lastStateSyncMsRef.current = nowMs;
+
+        setCandlesticks((prev) => {
+            if (!Array.isArray(prev) || prev.length === 0) return prev;
+            const cloned = [...prev];
+            const lastIdx = cloned.length - 1;
+            const last = cloned[lastIdx];
+            if ((last?.time as number) === (nextCandle.time as number)) {
+                cloned[lastIdx] = { ...last, ...nextCandle };
+            } else if ((last?.time as number) < (nextCandle.time as number)) {
+                cloned.push(nextCandle);
+                if (cloned.length > 400) cloned.shift();
+            } else {
+                return prev;
+            }
+            return cloned;
+        });
+    }, [interval]);
+
 
 
     // ... (Liquidation fetch effect remains same)
@@ -176,7 +247,7 @@ function AdvancedChart({
         // A. Render Open Positions
         if (positions && positions.length > 0) {
             positions.forEach(pos => {
-                if (pos.coin === symbol) {
+                if (String(pos.coin || '').toUpperCase() === normalizedSymbol) {
                     const size = parseFloat(pos.size || pos.szi);
                     const entryPrice = parseFloat(pos.entryPx || pos.entryPrice);
                     if (size !== 0) {
@@ -198,7 +269,7 @@ function AdvancedChart({
         // B. Render Open Orders
         if (openOrders && openOrders.length > 0) {
             openOrders.forEach(order => {
-                if (order.coin === symbol) {
+                if (String(order.coin || '').toUpperCase() === normalizedSymbol) {
                     const price = parseFloat(order.limitPx || order.price);
                     const size = parseFloat(order.sz || order.size);
                     const isBuy = order.side === 'B' || order.side === 'buy';
@@ -237,7 +308,7 @@ function AdvancedChart({
         }
         */
 
-    }, [positions, openOrders, marketData?.walls, showWalls, symbol]);
+    }, [positions, openOrders, marketData?.walls, showWalls, normalizedSymbol]);
 
     // ... (Nexus Signals effect remains same)
 
@@ -603,18 +674,23 @@ function AdvancedChart({
             rsiSeriesRef.current = null;
             lastCandleRef.current = null;
         };
-    }, [symbol, updateRange, onPriceSelect]);
+    }, [normalizedSymbol, updateRange, onPriceSelect]);
 
     // 2. Fetch Data (Candles)
     useEffect(() => {
         let isActive = true;
-        // lastCandleRef.current = null; 
+        hasInitialSnapshotRef.current = false;
+        lastSnapshotSignatureRef.current = '';
+        lastCandleRef.current = null;
 
-        const fetchData = async () => {
-            // Debug log
-
-            setIsLoading(true);
-            setError(null);
+        const fetchData = async (opts: { background?: boolean } = {}) => {
+            const isBackground = !!opts.background;
+            if (!isBackground) {
+                setError(null);
+                if (!hasInitialSnapshotRef.current) {
+                    setIsLoading(true);
+                }
+            }
 
             try {
                 // ... fetch logic ...
@@ -632,14 +708,14 @@ function AdvancedChart({
                 else if (interval === 'D') hlInterval = '1d';
 
                 // Fetch exactly 200 candles
-                const intervalMs = (interval === 'D' ? 1440 : parseInt(interval) || 15) * 60 * 1000;
+                const intervalMs = getIntervalMs(interval);
                 const startTime = Date.now() - (200 * intervalMs);
 
                 // Use the API_URL constant
                 const url = `${API_URL}/trading/candles`;
 
                 const res = await axios.post(url, {
-                    token: symbol,
+                    token: normalizedSymbol,
                     interval: hlInterval,
                     start_time: Math.floor(startTime),
                     end_time: Math.floor(Date.now())
@@ -662,92 +738,85 @@ function AdvancedChart({
 
                     if (formatted.length > 0) {
                         applyPricePrecision(derivePricePrecision(formatted));
-                        setCandlesticks(formatted);
-                        lastCandleRef.current = formatted[formatted.length - 1];
+                        const first = formatted[0];
+                        const last = formatted[formatted.length - 1];
+                        const signature = `${formatted.length}:${first.time}:${last.time}:${last.open}:${last.high}:${last.low}:${last.close}`;
+                        const snapshotChanged = signature !== lastSnapshotSignatureRef.current;
+                        lastCandleRef.current = last;
 
-                        // ISOLATION TEST: Clear all other series to rule out scale interference
-                        ema50Ref.current?.setData([]);
-                        ema200Ref.current?.setData([]);
-                        supertrendRef.current?.setData([]);
-                        elliotWaveRef.current?.setData([]);
-                        bbUpperRef.current?.setData([]);
-                        bbLowerRef.current?.setData([]);
-                        vwapRef.current?.setData([]);
-                        vwapRef.current?.setData([]);
-                        sarRef.current?.setData([]);
-                        rsiSeriesRef.current?.setData([]);
+                        if (snapshotChanged) {
+                            lastSnapshotSignatureRef.current = signature;
+                            setCandlesticks(formatted);
 
-                        // Retry loop to ensure Series ref is ready
-                        // DEBUG: AREA SERIES
-                        // candlestickSeriesRef.current?.setData([]); 
-
-                        // Restore Candlesticks
-                        if (candlestickSeriesRef.current) {
-                            // Enforce premium style on update
-                            candlestickSeriesRef.current.applyOptions({
-                                upColor: COLORS.bullish,
-                                downColor: COLORS.bearish,
-                                borderVisible: false,
-                                wickUpColor: COLORS.bullish, // Match body
-                                wickDownColor: COLORS.bearish, // Match body
-                            });
-                            candlestickSeriesRef.current.setData(formatted);
-                            // lastCandleRef already set
-                        }
-
-                        // Disable candlestick setData to avoid conflict
-                        /*
-                        if (candlestickSeriesRef.current) {
-                            // ...
-                        }
-                        */
-
-                        // Volume data
-                        // Volume data
-                        if (volumeSeriesRef.current) {
-                            const volumeData = formatted.map((c: any) => ({
-                                time: c.time,
-                                value: c.volume,
-                                color: c.close >= c.open ? 'rgba(38, 166, 154, 0.3)' : 'rgba(239, 83, 80, 0.3)'
-                            }));
-                            volumeSeriesRef.current.setData(volumeData);
-                        }
-
-                        // Force fit content nicely
-                        requestAnimationFrame(() => {
-                            if (isActive && chartRef.current) {
-                                chartRef.current.timeScale().fitContent();
-                                // Reset margins to default for test
-                                chartRef.current.priceScale('right').applyOptions({
-                                    autoScale: true,
-                                    scaleMargins: { top: 0.1, bottom: 0.1 }
+                            if (candlestickSeriesRef.current) {
+                                candlestickSeriesRef.current.applyOptions({
+                                    upColor: COLORS.bullish,
+                                    downColor: COLORS.bearish,
+                                    borderVisible: false,
+                                    wickUpColor: COLORS.bullish,
+                                    wickDownColor: COLORS.bearish,
                                 });
-                                updateRange();
+                                candlestickSeriesRef.current.setData(formatted);
                             }
-                        });
+
+                            if (volumeSeriesRef.current) {
+                                const volumeData = formatted.map((c: any) => ({
+                                    time: c.time,
+                                    value: c.volume,
+                                    color: c.close >= c.open ? 'rgba(38, 166, 154, 0.3)' : 'rgba(239, 83, 80, 0.3)'
+                                }));
+                                volumeSeriesRef.current.setData(volumeData);
+                            }
+                        }
+
+                        if (!hasInitialSnapshotRef.current) {
+                            hasInitialSnapshotRef.current = true;
+                            requestAnimationFrame(() => {
+                                if (isActive && chartRef.current) {
+                                    chartRef.current.timeScale().fitContent();
+                                    updateRange();
+                                }
+                            });
+                        } else if (snapshotChanged) {
+                            requestAnimationFrame(() => {
+                                if (isActive && chartRef.current) {
+                                    updateRange();
+                                }
+                            });
+                        }
                     } else {
                         console.warn("Parsed 0 valid candles");
-                        setError(`No data for ${symbol} (Parsed 0)`);
+                        if (!hasInitialSnapshotRef.current) {
+                            setError(`No data for ${normalizedSymbol} (Parsed 0)`);
+                        }
                     }
                 } else {
                     console.warn("Empty response from API", res.data);
-                    setError(`No data for ${symbol} ${hlInterval} (Raw: ${JSON.stringify(res.data).slice(0, 50)})`);
+                    if (!hasInitialSnapshotRef.current) {
+                        setError(`No data for ${normalizedSymbol} ${hlInterval} (Raw: ${JSON.stringify(res.data).slice(0, 50)})`);
+                    }
                 }
             } catch (e: any) {
                 console.error(e);
-                setError(`Connection failed: ${e.message}`);
+                if (!isBackground || !hasInitialSnapshotRef.current) {
+                    setError(`Connection failed: ${e.message}`);
+                }
             } finally {
-                if (isActive) setIsLoading(false);
+                if (isActive && !isBackground) {
+                    setIsLoading(false);
+                }
             }
         };
 
-        fetchData();
-        const intervalId = setInterval(fetchData, 60000);
+        void fetchData({ background: false });
+        const intervalId = setInterval(() => {
+            void fetchData({ background: true });
+        }, 60000);
         return () => {
             isActive = false;
             clearInterval(intervalId);
         };
-    }, [symbol, interval, updateRange, applyPricePrecision]);
+    }, [normalizedSymbol, interval, updateRange, applyPricePrecision]);
 
     // Apply liquidation markers
     useEffect(() => {
@@ -851,33 +920,30 @@ function AdvancedChart({
     // 4. Real-time WS
     useEffect(() => {
         if (!subscribe) return;
-        subscribe({ type: 'trades', coin: symbol });
+        subscribe({ type: 'trades', coin: normalizedSymbol });
 
         const removeListener = addListener('trades', (data: any) => {
             if (Array.isArray(data) && data.length > 0 && candlestickSeriesRef.current && lastCandleRef.current) {
-                const relevant = data.filter((d: any) => d.coin === symbol);
+                const relevant = data.filter((d: any) => String(d.coin || '').toUpperCase() === normalizedSymbol);
                 if (relevant.length === 0) return;
 
                 const lastTrade = relevant[relevant.length - 1];
                 const tradePrice = parseFloat(lastTrade.px);
-                const current = lastCandleRef.current;
-
-                const updated = {
-                    ...current,
-                    close: tradePrice,
-                    high: Math.max(current.high, tradePrice),
-                    low: Math.min(current.low, tradePrice),
-                };
-
-                candlestickSeriesRef.current.update(updated);
-                lastCandleRef.current = updated;
+                const tradeTs = Number(lastTrade.time || Date.now());
+                upsertRealtimeCandle(tradePrice, Number.isFinite(tradeTs) ? tradeTs : Date.now());
             }
         });
 
         return () => {
             if (removeListener) removeListener();
         };
-    }, [symbol, subscribe, addListener]);
+    }, [normalizedSymbol, subscribe, addListener, upsertRealtimeCandle]);
+
+    useEffect(() => {
+        if (!lastCandleRef.current) return;
+        if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
+        upsertRealtimeCandle(Number(currentPrice), Date.now());
+    }, [currentPrice, upsertRealtimeCandle]);
 
     // 5. Background Shading based on bias
     useEffect(() => {
@@ -898,7 +964,7 @@ function AdvancedChart({
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm">
                     <div className="flex flex-col items-center gap-3">
                         <div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
-                        <span className="text-xs text-gray-500 font-medium">Loading {symbol} data...</span>
+                        <span className="text-xs text-gray-500 font-medium">Loading {normalizedSymbol} data...</span>
                     </div>
                 </div>
             )}
@@ -917,7 +983,7 @@ function AdvancedChart({
                 <div className="absolute inset-0 z-10 pointer-events-none">
                     <OrderBookProfile
                         currentPrice={currentPrice}
-                        symbol={symbol}
+                        symbol={normalizedSymbol}
                         height={chartHeight}
                         maxPrice={visibleRange.max}
                         minPrice={visibleRange.min}
@@ -932,7 +998,7 @@ function AdvancedChart({
                 <div className="absolute inset-0 z-[50] bg-[#0b0b0b]">
                     <LiquidationHeatmap
                         currentPrice={currentPrice}
-                        symbol={symbol}
+                        symbol={normalizedSymbol}
                         openInterest={openInterest}
                         fundingRate={fundingRate}
                         onPriceSelect={onPriceSelect}
@@ -962,7 +1028,7 @@ function AdvancedChart({
                     <div className="text-2xl font-mono font-black text-white/10">
                         ${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: currentPrice < 1 ? 6 : 2 })}
                     </div>
-                    <div className="text-xs font-bold text-white/5 uppercase tracking-widest">{symbol}/USD</div>
+                    <div className="text-xs font-bold text-white/5 uppercase tracking-widest">{normalizedSymbol}/USD</div>
                 </div>
             )}
 

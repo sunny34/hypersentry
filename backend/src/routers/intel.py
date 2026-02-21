@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 import datetime
 import dateutil.parser
+from src.alpha_engine.models.ai_command_models import AIBriefResponse
+from src.intel.briefing import generate_ai_brief
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/intel", tags=["Intelligence"])
@@ -273,6 +275,52 @@ async def get_intel_nexus(
         processed_signals.append(processed_sig)
 
     return processed_signals
+
+
+@router.get("/ai-brief", response_model=AIBriefResponse)
+async def get_ai_brief(
+    request: Request,
+    symbol: str = "BTC",
+    _user: Optional[User] = Depends(get_current_user),
+):
+    """
+    AI Thesis / Counter-Thesis briefing for the AI Command Center.
+    Uses Gemini when configured and falls back to deterministic synthesis.
+    """
+    from src.intel.nexus import nexus
+    from src.intel.providers.microstructure import MicrostructureProvider
+
+    symbol = symbol.split("/")[0].split("-")[0].upper()
+    signals = await nexus.get_alpha_confluence()
+    signal = next((s for s in signals if str(s.get("token", "")).upper() == symbol), None)
+
+    whale_summary: Dict[str, Any] = {}
+    tracker = getattr(request.app.state, "whale_tracker", None)
+    if tracker:
+        try:
+            whale_summary = tracker.get_whale_summary(coin=symbol) or {}
+        except Exception as exc:
+            logger.warning("Whale summary unavailable for ai-brief symbol=%s err=%s", symbol, exc)
+
+    micro_state: Dict[str, Any] = {}
+    intel_engine = getattr(request.app.state, "intel_engine", None)
+    if intel_engine:
+        try:
+            provider = next(
+                (p for p in intel_engine.providers if isinstance(p, MicrostructureProvider)),
+                None,
+            )
+            if provider:
+                micro_state = await provider.get_symbol_state(symbol) or {}
+        except Exception as exc:
+            logger.warning("Microstructure unavailable for ai-brief symbol=%s err=%s", symbol, exc)
+
+    return await generate_ai_brief(
+        symbol=symbol,
+        signal=signal,
+        whale_summary=whale_summary,
+        micro_state=micro_state,
+    )
 
 from pydantic import BaseModel
 class DeobfuscateRequest(BaseModel):

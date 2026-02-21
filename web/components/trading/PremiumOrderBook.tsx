@@ -22,6 +22,8 @@ const HL_WS_URL = 'wss://api.hyperliquid.xyz/ws';
 function useDirectL2(coin: string, updateFromAggregator: (data: Record<string, unknown>) => void) {
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const staleWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const lastMessageTsRef = useRef(0);
 
     useEffect(() => {
         if (!coin) return;
@@ -35,6 +37,7 @@ function useDirectL2(coin: string, updateFromAggregator: (data: Record<string, u
                 wsRef.current = ws;
 
                 ws.onopen = () => {
+                    lastMessageTsRef.current = Date.now();
                     ws.send(JSON.stringify({
                         method: 'subscribe',
                         subscription: { type: 'l2Book', coin: symbol }
@@ -45,6 +48,7 @@ function useDirectL2(coin: string, updateFromAggregator: (data: Record<string, u
                     try {
                         const msg = JSON.parse(event.data);
                         if (msg.channel === 'l2Book' && msg.data?.coin === symbol) {
+                            lastMessageTsRef.current = Date.now();
                             const levels = msg.data.levels;
                             if (Array.isArray(levels) && levels.length >= 2) {
                                 updateFromAggregator({
@@ -68,6 +72,23 @@ function useDirectL2(coin: string, updateFromAggregator: (data: Record<string, u
                 ws.onerror = () => {
                     ws.close();
                 };
+
+                if (staleWatchdogRef.current) {
+                    clearInterval(staleWatchdogRef.current);
+                    staleWatchdogRef.current = null;
+                }
+                staleWatchdogRef.current = setInterval(() => {
+                    if (cancelled) return;
+                    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+                    const ageMs = Date.now() - lastMessageTsRef.current;
+                    if (ageMs > ORDERBOOK_STALE_MS * 2) {
+                        try {
+                            wsRef.current.close();
+                        } catch {
+                            // Best-effort reconnect path.
+                        }
+                    }
+                }, 1000);
             } catch {
                 if (!cancelled) {
                     reconnectTimerRef.current = setTimeout(connect, 2000);
@@ -80,6 +101,10 @@ function useDirectL2(coin: string, updateFromAggregator: (data: Record<string, u
         return () => {
             cancelled = true;
             if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+            if (staleWatchdogRef.current) {
+                clearInterval(staleWatchdogRef.current);
+                staleWatchdogRef.current = null;
+            }
             if (wsRef.current) {
                 try {
                     wsRef.current.send(JSON.stringify({
@@ -107,12 +132,17 @@ export default function PremiumOrderBook({
     onSelectSize,
     currentPrice = 0
 }: PremiumOrderBookProps) {
+    const symbol = useMemo(
+        () => String(coin || 'BTC').trim().split(/[/-]/)[0].toUpperCase(),
+        [coin],
+    );
+
     // Consume high-fidelity data from Unified Market Store
-    const marketData = useMarketStore((state: any) => state.marketData[coin]);
+    const marketData = useMarketStore((state: any) => state.marketData[symbol]);
     const updateFromAggregator = useMarketStore((state: any) => state.updateFromAggregator);
 
     // Direct Hyperliquid L2 WS — sub-ms latency, bypasses backend relay
-    useDirectL2(coin, updateFromAggregator);
+    useDirectL2(symbol, updateFromAggregator);
 
     const bids = useMemo(() => marketData?.book[0] || [], [marketData?.book]);
     const asks = useMemo(() => marketData?.book[1] || [], [marketData?.book]);
@@ -233,7 +263,7 @@ export default function PremiumOrderBook({
 
     // Fallback hydration path: if WS depth is missing/stale, fetch a snapshot from backend.
     useEffect(() => {
-        if (!coin) return;
+        if (!symbol) return;
 
         let cancelled = false;
         let timer: ReturnType<typeof setInterval> | null = null;
@@ -241,7 +271,6 @@ export default function PremiumOrderBook({
         const hydrateFromSnapshot = async () => {
             if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
 
-            const symbol = coin.toUpperCase();
             const latest = useMarketStore.getState().marketData[symbol];
             const latestBook = latest?.book;
             const hasLocalDepth = Array.isArray(latestBook)
@@ -279,7 +308,7 @@ export default function PremiumOrderBook({
             state.lastFetchMs = nowMs;
             state.inFlight = (async () => {
                 try {
-                    const res = await fetch(`${API_URL}/trading/orderbook?coin=${encodeURIComponent(coin)}&depth=40`);
+                    const res = await fetch(`${API_URL}/trading/orderbook?coin=${encodeURIComponent(symbol)}&depth=40`);
                     if (!res.ok) return;
                     const payload = await res.json();
                     if (cancelled) return;
@@ -335,7 +364,7 @@ export default function PremiumOrderBook({
             cancelled = true;
             if (timer) clearInterval(timer);
         };
-    }, [coin, updateFromAggregator]);
+    }, [symbol, updateFromAggregator]);
 
     return (
         <div className="flex flex-col h-full w-full bg-[var(--background)] text-[var(--foreground)] text-[10px] select-none overflow-hidden">

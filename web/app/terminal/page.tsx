@@ -183,7 +183,11 @@ function TradingTerminalContent() {
     const [currentPrice, setCurrentPrice] = useState<number>(0);
     const [priceChangePercent, setPriceChangePercent] = useState<number>(0);
     const [isLoadingTokens, setIsLoadingTokens] = useState(true);
-    const selectedMarketData = useMarketStore((state) => state.marketData[selectedToken]);
+    const selectedSymbol = useMemo(
+        () => String(selectedToken || 'BTC').trim().split(/[/-]/)[0].toUpperCase(),
+        [selectedToken],
+    );
+    const selectedMarketData = useMarketStore((state) => state.marketData[selectedSymbol]);
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -241,7 +245,7 @@ function TradingTerminalContent() {
 
     // Indicators Logic
     const indicatorMenuRef = useRef<HTMLDivElement>(null);
-    const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set(['EMA 50', 'EMA 200', 'Supertrend']));
+    const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set(['Volume', 'EMA 50', 'EMA 200', 'Supertrend']));
     const [showIndicatorMenu, setShowIndicatorMenu] = useState(false);
 
     const toggleIndicator = useCallback((indicator: string) => {
@@ -595,26 +599,26 @@ function TradingTerminalContent() {
     useEffect(() => {
         if (tokens.length === 0) return;
 
-        const exists = tokens.find(t => t.symbol === selectedToken);
+        const exists = tokens.find(t => t.symbol === selectedSymbol);
         if (!exists) {
             setSelectedToken(tokens[0].symbol);
         } else if (currentPrice === 0) {
             setCurrentPrice(exists.price);
             setPriceChangePercent(exists.change24h);
         }
-    }, [tokens, selectedToken, currentPrice]);
+    }, [tokens, selectedSymbol, currentPrice]);
 
     // Live price from WS-backed market store
     useEffect(() => {
         const livePrice = Number(selectedMarketData?.price || 0);
         if (livePrice <= 0) return;
         setCurrentPrice(livePrice);
-        const tokenData = tokens.find(t => t.symbol === selectedToken);
+        const tokenData = tokens.find(t => t.symbol === selectedSymbol);
         if (tokenData && tokenData.prevPrice > 0) {
             const change = ((livePrice - tokenData.prevPrice) / tokenData.prevPrice) * 100;
             setPriceChangePercent(change);
         }
-    }, [selectedMarketData?.price, selectedToken, tokens]);
+    }, [selectedMarketData?.price, selectedSymbol, tokens]);
 
     // Low-frequency fallback when WS price has not arrived yet
     useEffect(() => {
@@ -625,16 +629,16 @@ function TradingTerminalContent() {
             if (!active || inFlight) return;
             if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
 
-            const livePrice = Number(useMarketStore.getState().marketData[selectedToken]?.price || 0);
+            const livePrice = Number(useMarketStore.getState().marketData[selectedSymbol]?.price || 0);
             if (livePrice > 0) return;
 
             inFlight = true;
             try {
                 const res = await axios.get(`${API_URL}/trading/prices`, { timeout: 10000 });
-                const price = parseFloat(res.data?.[selectedToken] || 0);
+                const price = parseFloat(res.data?.[selectedSymbol] || 0);
                 if (price > 0) {
                     setCurrentPrice(price);
-                    const tokenData = tokens.find(t => t.symbol === selectedToken);
+                    const tokenData = tokens.find(t => t.symbol === selectedSymbol);
                     if (tokenData && tokenData.prevPrice > 0) {
                         const change = ((price - tokenData.prevPrice) / tokenData.prevPrice) * 100;
                         setPriceChangePercent(change);
@@ -662,7 +666,7 @@ function TradingTerminalContent() {
             clearInterval(interval);
             document.removeEventListener('visibilitychange', onVisibility);
         };
-    }, [selectedToken, tokens]);
+    }, [selectedSymbol, tokens]);
 
     // Whale Alert Sound Engine
     useEffect(() => {
@@ -707,13 +711,13 @@ function TradingTerminalContent() {
 
     // Dynamic Symbol Subscription
     useEffect(() => {
-        if (!isWsConnected || !selectedToken) return;
-        const symbol = selectedToken.toUpperCase();
+        if (!isWsConnected || !selectedSymbol) return;
+        const symbol = selectedSymbol;
         sendMessage({ type: 'subscribe', coin: symbol });
         return () => {
             sendMessage({ type: 'unsubscribe', coin: symbol });
         };
-    }, [selectedToken, isWsConnected, sendMessage]);
+    }, [selectedSymbol, isWsConnected, sendMessage]);
 
     // Poll for Surge Signals
     useEffect(() => {
@@ -783,8 +787,8 @@ function TradingTerminalContent() {
 
     // Memoize selected token data to avoid repeated lookups
     const selectedTokenData = useMemo(() =>
-        tokens.find(t => t.symbol === selectedToken),
-        [tokens, selectedToken]
+        tokens.find(t => t.symbol === selectedSymbol),
+        [tokens, selectedSymbol]
     );
 
     if (authLoading) {
@@ -817,7 +821,7 @@ function TradingTerminalContent() {
                         {/* Token Selector & Price */}
                         <div className="flex items-center gap-3">
                             <TokenSelector
-                                selectedToken={selectedToken}
+                                selectedToken={selectedSymbol}
                                 tokens={tokens}
                                 onSelect={(token) => {
                                     setSelectedToken(token);
@@ -954,7 +958,7 @@ function TradingTerminalContent() {
                                         return (
                                             <div className="h-full bg-black/40 overflow-hidden">
                                                 <AICommandCenter
-                                                    selectedToken={selectedToken}
+                                                    selectedToken={selectedSymbol}
                                                     onBack={() => setActiveTab('positions')}
                                                     onSelectToken={(t: string) => {
                                                         setSelectedToken(t);
@@ -986,7 +990,7 @@ function TradingTerminalContent() {
                                                             </div>
                                                         </div>
                                                         <div className="h-full overflow-hidden">
-                                                            <StrategySimulator symbol={selectedToken} currentPrice={currentPrice} fundingRate={selectedTokenData?.funding || 0} onCopyTrade={async (side, price, type) => { /* trade logic preserved in actual implementation */ }} />
+                                                            <StrategySimulator symbol={selectedSymbol} currentPrice={currentPrice} fundingRate={selectedTokenData?.funding || 0} onCopyTrade={async (side, price, type) => { /* trade logic preserved in actual implementation */ }} />
                                                         </div>
                                                     </div>
                                                 ) : (
@@ -1037,21 +1041,21 @@ function TradingTerminalContent() {
                                                     ) : (activeTab as any) === 'analysis' ? (
                                                         <div className="h-full p-4 overflow-y-auto custom-scrollbar">
                                                             <AIAnalysis
-                                                                symbol={selectedToken}
+                                                                symbol={selectedSymbol}
                                                                 interval={selectedInterval}
-                                                                positionContext={positions.find((p: any) => (p.coin || p.position?.coin) === selectedToken)}
+                                                                positionContext={positions.find((p: any) => String(p.coin || p.position?.coin || '').toUpperCase() === selectedSymbol)}
                                                                 onClosePosition={handleClosePosition}
                                                             />
                                                         </div>
                                                     ) : activeTab === 'twap' ? (
-                                                        <TwapIntelligence symbol={selectedToken} />
+                                                        <TwapIntelligence symbol={selectedSymbol} />
                                                     ) : activeTab === 'cohorts' ? (
-                                                        <CohortSentiment symbol={selectedToken} />
+                                                        <CohortSentiment symbol={selectedSymbol} />
                                                     ) : activeTab === 'news' ? (
-                                                        <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
+                                                        <NewsFeed symbol={selectedSymbol} tokens={tokens} aiBias={aiBias} />
                                                     ) : (activeTab as any) === 'ai' ? (
                                                         <AICommandCenter
-                                                            selectedToken={selectedToken}
+                                                            selectedToken={selectedSymbol}
                                                             onSelectToken={(t: string) => {
                                                                 setSelectedToken(t);
                                                                 setNotification({ title: 'Token Selected', message: `Analyzing ${t}`, type: 'bullish' });
@@ -1076,9 +1080,9 @@ function TradingTerminalContent() {
                                                 orderForm: settings.panels.find(p => p.id === 'orderForm')?.enabled ?? true,
                                                 console: settings.panels.find(p => p.id === 'console')?.enabled ?? true,
                                             }}
-                                            chartPanel={<ChartTabs symbol={selectedToken} interval={selectedInterval} positions={positions} openOrders={openOrders} bias={aiBias} onPriceSelect={setBookPrice} currentPrice={currentPrice} openInterest={selectedTokenData?.openInterest || 0} fundingRate={selectedTokenData?.funding || 0} activeIndicators={activeIndicators} onToggleIndicator={toggleIndicator} />}
-                                            orderBookPanel={<PremiumOrderBook coin={selectedToken} currentPrice={currentPrice} onSelectPrice={setBookPrice} onSelectSize={setBookSize} />}
-                                            orderFormPanel={<OrderForm symbol={selectedToken} currentPrice={currentPrice} isAuthenticated={isAuthenticated} token={token} walletBalance={walletBalance} agent={agent} isAgentActive={isAgentActive} onEnableAgent={enableSession} onLogin={() => login('wallet')} onDeposit={() => setShowDeposit(true)} selectedPrice={bookPrice} selectedSize={bookSize} error={error || undefined} maxLeverage={selectedTokenData?.maxLeverage || 50} />}
+                                            chartPanel={<ChartTabs symbol={selectedSymbol} interval={selectedInterval} positions={positions} openOrders={openOrders} bias={aiBias} onPriceSelect={setBookPrice} currentPrice={currentPrice} openInterest={selectedTokenData?.openInterest || 0} fundingRate={selectedTokenData?.funding || 0} activeIndicators={activeIndicators} onToggleIndicator={toggleIndicator} />}
+                                            orderBookPanel={<PremiumOrderBook coin={selectedSymbol} currentPrice={currentPrice} onSelectPrice={setBookPrice} onSelectSize={setBookSize} />}
+                                            orderFormPanel={<OrderForm symbol={selectedSymbol} currentPrice={currentPrice} isAuthenticated={isAuthenticated} token={token} walletBalance={walletBalance} agent={agent} isAgentActive={isAgentActive} onEnableAgent={enableSession} onLogin={() => login('wallet')} onDeposit={() => setShowDeposit(true)} selectedPrice={bookPrice} selectedSize={bookSize} error={error || undefined} maxLeverage={selectedTokenData?.maxLeverage || 50} />}
                                             consolePanel={
                                                 <div className="flex h-full group/hub bg-[#050505]/40">
                                                     <div className="w-[48px] border-r border-white/5 bg-[#0a0a0a] flex flex-col z-10 transition-all hover:w-[120px] overflow-hidden">
@@ -1132,21 +1136,21 @@ function TradingTerminalContent() {
                                                         ) : activeTab === 'analysis' ? (
                                                             <div className="h-full p-4 overflow-y-auto custom-scrollbar">
                                                                 <AIAnalysis
-                                                                    symbol={selectedToken}
+                                                                    symbol={selectedSymbol}
                                                                     interval={selectedInterval}
-                                                                    positionContext={positions.find((p: any) => (p.coin || p.position?.coin) === selectedToken)}
+                                                                    positionContext={positions.find((p: any) => String(p.coin || p.position?.coin || '').toUpperCase() === selectedSymbol)}
                                                                     onClosePosition={handleClosePosition}
                                                                 />
                                                             </div>
                                                         ) : activeTab === 'twap' ? (
-                                                            <TwapIntelligence symbol={selectedToken} />
+                                                            <TwapIntelligence symbol={selectedSymbol} />
                                                         ) : activeTab === 'cohorts' ? (
-                                                            <CohortSentiment symbol={selectedToken} />
+                                                            <CohortSentiment symbol={selectedSymbol} />
                                                         ) : activeTab === 'news' ? (
-                                                            <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
+                                                            <NewsFeed symbol={selectedSymbol} tokens={tokens} aiBias={aiBias} />
                                                         ) : (activeTab as any) === 'ai' ? (
                                                             <AICommandCenter
-                                                                selectedToken={selectedToken}
+                                                                selectedToken={selectedSymbol}
                                                                 onSelectToken={(t: string) => {
                                                                     setSelectedToken(t);
                                                                     setNotification({ title: 'Token Selected', message: `Analyzing ${t}`, type: 'bullish' });
@@ -1172,7 +1176,7 @@ function TradingTerminalContent() {
                                 <div className="flex flex-col gap-1.5 min-h-0 pb-1.5 shrink-0 h-[60%] w-full">
                                     <div className={`min-w-0 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden h-full flex flex-col relative ${mobileTab === 'chart' ? 'flex' : 'hidden'}`}>
                                         <ChartTabs
-                                            symbol={selectedToken}
+                                            symbol={selectedSymbol}
                                             interval={selectedInterval}
                                             positions={positions}
                                             openOrders={openOrders}
@@ -1195,11 +1199,11 @@ function TradingTerminalContent() {
 
                                     <div className={`shrink-0 flex flex-row gap-1.5 min-h-0 ${mobileTab === 'order' || mobileTab === 'book' ? 'flex' : 'hidden'}`}>
                                         <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden relative">
-                                            <PremiumOrderBook coin={selectedToken} currentPrice={currentPrice} onSelectPrice={(px) => setBookPrice(px)} onSelectSize={(sz) => setBookSize(sz)} />
+                                            <PremiumOrderBook coin={selectedSymbol} currentPrice={currentPrice} onSelectPrice={(px) => setBookPrice(px)} onSelectSize={(sz) => setBookSize(sz)} />
                                         </div>
                                         <div className="w-1/2 bg-[#0a0a0a] border border-white/5 rounded-xl p-3 overflow-y-auto flex flex-col">
                                             <OrderForm
-                                                symbol={selectedToken}
+                                                symbol={selectedSymbol}
                                                 currentPrice={currentPrice}
                                                 isAuthenticated={isAuthenticated}
                                                 token={token}
@@ -1238,7 +1242,7 @@ function TradingTerminalContent() {
 
                                 <div className={`flex flex-col flex-1 min-h-0 w-full bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden ${mobileTab === 'intel' ? 'flex' : 'hidden'}`}>
                                     <div className="flex-1 overflow-hidden">
-                                        <NewsFeed symbol={selectedToken} tokens={tokens} aiBias={aiBias} />
+                                        <NewsFeed symbol={selectedSymbol} tokens={tokens} aiBias={aiBias} />
                                     </div>
                                 </div>
                             </Suspense>
