@@ -11,7 +11,7 @@ const AssistedLayout = () => {
     const activeSymbol = useAlphaStore((s) => s.activeSymbol);
 
     return (
-        <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-0 overflow-y-auto lg:overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 gap-0 overflow-y-auto lg:overflow-y-auto">
             {/* Left: Opportunities (Smaller focus) */}
             <div className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-gray-800 flex flex-col min-h-[200px] max-h-[34vh] lg:max-h-none">
                 <div className="h-10 bg-gray-950 px-4 flex items-center border-b border-gray-800 text-xs font-bold text-gray-400 uppercase tracking-widest">
@@ -39,7 +39,7 @@ const AssistedLayout = () => {
             </div>
 
             {/* Right: Risk Management */}
-            <div className="lg:col-span-3 flex flex-col min-h-[280px]">
+            <div className="lg:col-span-3 flex flex-col min-h-[280px] lg:min-h-0 lg:overflow-y-auto">
                 <div className="h-[320px] lg:h-2/3">
                     <PortfolioRiskPanel />
                 </div>

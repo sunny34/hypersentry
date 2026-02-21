@@ -177,9 +177,10 @@ const OpportunityTable = () => {
     }
 
     const getQualityBadge = (score: number) => {
-        if (score > 1.5) return <span className="px-1.5 py-0.5 rounded-sm bg-emerald-500/20 text-emerald-500 text-[8px] font-bold border border-emerald-500/30">HIGH EDGE</span>;
-        if (score > 0.5) return <span className="px-1.5 py-0.5 rounded-sm bg-blue-500/20 text-blue-500 text-[8px] font-bold border border-blue-500/30">LOW QUALITY</span>;
-        return <span className="px-1.5 py-0.5 rounded-sm bg-gray-800 text-gray-500 text-[8px] font-bold border border-gray-700">NEUTRAL</span>;
+        if (score >= 1.5) return <span className="px-1.5 py-0.5 rounded-sm bg-emerald-500/20 text-emerald-500 text-[8px] font-bold border border-emerald-500/30">HIGH EDGE</span>;
+        if (score >= 0.5) return <span className="px-1.5 py-0.5 rounded-sm bg-blue-500/20 text-blue-400 text-[8px] font-bold border border-blue-500/30">MED EDGE</span>;
+        if (score <= -0.5) return <span className="px-1.5 py-0.5 rounded-sm bg-red-500/20 text-red-400 text-[8px] font-bold border border-red-500/30">NEG EDGE</span>;
+        return <span className="px-1.5 py-0.5 rounded-sm bg-gray-800 text-gray-500 text-[8px] font-bold border border-gray-700">FLAT</span>;
     };
 
     return (
@@ -219,7 +220,7 @@ const OpportunityTable = () => {
                             <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] font-mono">
                                 <div>
                                     <div className="text-gray-600 uppercase">Edge</div>
-                                    <div className={item.edgeScore > 1 ? 'text-emerald-400' : 'text-gray-400'}>{item.edgeScore.toFixed(2)}</div>
+                                    <div className={item.edgeScore > 0.5 ? 'text-emerald-400' : item.edgeScore < -0.5 ? 'text-red-400' : 'text-gray-400'}>{item.edgeScore.toFixed(2)}</div>
                                 </div>
                                 <div>
                                     <div className="text-gray-600 uppercase">Conviction</div>
@@ -270,7 +271,7 @@ const OpportunityTable = () => {
                                     onClick={() => toggleSort('edge')}
                                     className="hover:text-blue-400 transition-colors"
                                 >
-                                    Edge Score {getSortArrow('edge')}
+                                    Stat Edge {getSortArrow('edge')}
                                 </button>
                                 <div
                                     role="separator"
@@ -339,7 +340,7 @@ const OpportunityTable = () => {
                                     </td>
 
                                     <td className="px-3 sm:px-4 py-3 text-right">
-                                        <span className={item.edgeScore > 1 ? 'text-emerald-400' : 'text-gray-400'}>
+                                        <span className={item.edgeScore > 0.5 ? 'text-emerald-400' : item.edgeScore < -0.5 ? 'text-red-400' : 'text-gray-400'}>
                                             {item.edgeScore.toFixed(2)}
                                         </span>
                                     </td>

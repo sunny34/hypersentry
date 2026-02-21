@@ -27,7 +27,7 @@ const AutonomousLayout = () => {
     const traceLogs = executionLogs.slice(0, 6);
 
     return (
-        <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-0 overflow-y-auto lg:overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 gap-0 overflow-y-auto lg:overflow-y-auto">
             {/* Left: System Governance + Signals */}
             <div className="lg:col-span-3 border-b lg:border-b-0 lg:border-r border-gray-800 flex flex-col bg-gray-950/20 min-h-[320px]">
                 <div className="h-10 bg-gray-950 px-4 flex items-center border-b border-gray-800 text-xs font-bold text-gray-400 uppercase tracking-widest">

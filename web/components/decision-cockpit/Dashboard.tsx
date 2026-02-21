@@ -45,7 +45,7 @@ const Dashboard = () => {
             <GlobalStatusBar />
 
             {/* 2. Main Workspace (Mode-Aware Layout) */}
-            <div className="flex-1 overflow-hidden bg-[radial-gradient(ellipse_at_top_right,rgba(15,23,42,0.18),transparent_55%),radial-gradient(ellipse_at_bottom_left,rgba(10,15,26,0.18),transparent_55%)]">
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top_right,rgba(15,23,42,0.18),transparent_55%),radial-gradient(ellipse_at_bottom_left,rgba(10,15,26,0.18),transparent_55%)]">
                 <Suspense fallback={<LayoutLoader />}>
                     {renderLayout()}
                 </Suspense>

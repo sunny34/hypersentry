@@ -58,8 +58,8 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
             };
         }
         return {
-            label: 'NO EDGE',
-            detail: 'Neutral environment',
+            label: 'CONVICTION NEUTRAL',
+            detail: 'Conviction model is neutral',
             scoreClass: 'text-gray-400',
             badgeClass: 'border-gray-600 bg-gray-800/50 text-gray-300',
             glowClass: 'bg-gray-500'
@@ -108,6 +108,41 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
         ? Object.values(diag.components || {}).sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution)).slice(0, 3)
         : [];
     const diagReasons = (diag?.reasoning || []).slice(0, 3);
+    const convictionBias = conviction.score >= 60 ? 'LONG' : conviction.score <= 40 ? 'SHORT' : 'NEUTRAL';
+    const hasCollectiveEdge = Math.abs(diag?.collective_raw ?? 0) >= 0.12;
+    const collectiveBias = hasCollectiveEdge ? (diag?.collective_bias ?? 'NEUTRAL') : 'NEUTRAL';
+    const divergence = convictionBias !== 'NEUTRAL' && collectiveBias !== 'NEUTRAL' && convictionBias !== collectiveBias;
+    const tacticalCollective = convictionBias === 'NEUTRAL' && collectiveBias !== 'NEUTRAL';
+    const confluent = convictionBias !== 'NEUTRAL' && convictionBias === collectiveBias;
+    const statEdge = conviction.realized_vol > 0 ? (conviction.expected_move / conviction.realized_vol) : 0;
+    const statEdgeColor = statEdge >= 0.5 ? 'text-emerald-400' : statEdge <= -0.5 ? 'text-red-400' : 'text-gray-400';
+    const collectiveChipClass = collectiveBias === 'LONG'
+        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+        : collectiveBias === 'SHORT'
+            ? 'border-red-500/40 bg-red-500/10 text-red-300'
+            : 'border-gray-700 bg-gray-900/50 text-gray-400';
+
+    const directiveText = (() => {
+        if (confluent && convictionBias === 'LONG') {
+            return <>Confluent long edge. Allocate <span className="text-blue-400">{risk?.risk_percent_equity || '1.5'}%</span> with <span className="text-emerald-500">{execution?.strategy || 'Hybrid'}</span> execution.</>;
+        }
+        if (confluent && convictionBias === 'SHORT') {
+            return <>Confluent short edge. Keep execution tight and monitor adverse selection before committing size.</>;
+        }
+        if (tacticalCollective) {
+            return <>Conviction is neutral, but microstructure is <span className={collectiveBias === 'LONG' ? 'text-emerald-400' : 'text-red-400'}>{collectiveBias}</span>. Treat as tactical, lower-confidence edge.</>;
+        }
+        if (divergence) {
+            return <>Signal divergence: conviction is <span className={convictionBias === 'LONG' ? 'text-emerald-400' : 'text-red-400'}>{convictionBias}</span> while microstructure is <span className={collectiveBias === 'LONG' ? 'text-emerald-400' : 'text-red-400'}>{collectiveBias}</span>. Reduce size and wait for alignment.</>;
+        }
+        if (conviction.score >= 60) {
+            return <>High probability upside move. Allocate <span className="text-blue-400">{risk?.risk_percent_equity || '1.5'}%</span> equity with <span className="text-emerald-500">{execution?.strategy || 'Hybrid'}</span> execution.</>;
+        }
+        if (conviction.score <= 40) {
+            return <>Downside pressure identified. System recommends <span className="text-red-500">Short Bias</span>. High urgency execution.</>;
+        }
+        return <>Signals are balanced. System recommends <span className="text-gray-500">waiting for asymmetry</span>.</>;
+    })();
 
     return (
         <div className="relative w-full border border-gray-800 bg-black overflow-hidden flex flex-col min-h-[400px] sm:min-h-[450px] p-4 sm:p-6 lg:p-8 gap-5 sm:gap-7">
@@ -118,6 +153,9 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
                         <h1 className="text-4xl sm:text-5xl font-black tracking-tighter text-white">{symbol}</h1>
                         <span className={`px-2 py-0.5 text-[10px] font-bold border uppercase rounded ${info.badgeClass}`}>
                             {info.label}
+                        </span>
+                        <span className={`px-2 py-0.5 text-[10px] font-bold border uppercase rounded ${collectiveChipClass}`}>
+                            Collective {diag?.collective_score ?? '--'} {collectiveBias}
                         </span>
                     </div>
                     <div className="font-mono text-gray-400 text-base sm:text-lg">
@@ -144,13 +182,7 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
             <div className="z-10 bg-gray-950/80 border border-gray-800 p-4 sm:p-6 rounded-sm text-center">
                 <div className="text-gray-500 text-[10px] uppercase tracking-widest mb-2 font-bold">System Directive</div>
                 <div className="text-base sm:text-xl font-mono text-white leading-relaxed">
-                    {conviction.score >= 60 ? (
-                        <>High probability upside move. Allocate <span className="text-blue-400">{risk?.risk_percent_equity || '1.5'}%</span> equity with <span className="text-emerald-500">{execution?.strategy || 'Hybrid'}</span> execution.</>
-                    ) : conviction.score <= 40 ? (
-                        <>Downside pressure identified. System recommends <span className="text-red-500">Short Bias</span>. High urgency execution.</>
-                    ) : (
-                        <>{info.detail}. System recommends <span className="text-gray-500">waiting for asymmetry</span>.</>
-                    )}
+                    {directiveText}
                 </div>
             </div>
 
@@ -179,6 +211,8 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
                     <div>Book <span className="text-gray-300 font-bold">{diag?.metrics?.orderbook_imbalance_signed?.toFixed(3) ?? '--'}</span></div>
                     <div>OI Source <span className="text-gray-300 font-bold">{diag?.metrics?.open_interest_source || '--'}</span></div>
                     <div>Walls <span className="text-gray-300 font-bold">{diag?.metrics?.wall_count ?? 0}</span></div>
+                    <div>Stat Edge <span className={`font-bold ${statEdgeColor}`}>{statEdge >= 0 ? '+' : ''}{statEdge.toFixed(2)}</span></div>
+                    <div>Conviction Bias <span className={`font-bold ${convictionBias === 'LONG' ? 'text-emerald-400' : convictionBias === 'SHORT' ? 'text-red-400' : 'text-gray-400'}`}>{convictionBias}</span></div>
                 </div>
 
                 {diagReasons.length > 0 && (
