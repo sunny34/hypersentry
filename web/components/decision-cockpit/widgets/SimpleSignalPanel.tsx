@@ -1,11 +1,13 @@
 "use client";
 import React from 'react';
 import { useAlphaStore } from '@/store/useAlphaStore';
-import { ArrowUp, ArrowDown, Clock, Activity } from 'lucide-react';
+import { useModeStore } from '@/store/useModeStore';
+import { ArrowUp, ArrowDown, Clock, Activity, CheckCircle2, XCircle } from 'lucide-react';
 
 const SimpleSignalPanel: React.FC = () => {
     const activeSymbol = useAlphaStore((s) => s.activeSymbol || 'BTC');
     const convictions = useAlphaStore((s) => s.convictions);
+    const mode = useModeStore((s) => s.mode);
     const activeConviction = convictions[activeSymbol];
 
     // Tracked symbols for table
@@ -15,14 +17,14 @@ const SimpleSignalPanel: React.FC = () => {
 
     const getSignalColor = (bias: string) => {
         switch (bias) {
-            case 'LONG': return 'text-green-400 border-green-400/30 bg-green-400/10';
+            case 'LONG': return 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10';
             case 'SHORT': return 'text-red-400 border-red-400/30 bg-red-400/10';
             default: return 'text-gray-400 border-gray-700 bg-gray-900/50';
         }
     };
 
     const getScoreColor = (score: number) => {
-        if (score >= 65) return 'text-green-400';
+        if (score >= 65) return 'text-emerald-400';
         if (score >= 55) return 'text-yellow-400';
         if (score <= 35) return 'text-red-400';
         if (score <= 45) return 'text-orange-400';
@@ -66,7 +68,7 @@ const SimpleSignalPanel: React.FC = () => {
                 <div className="mt-2">
                     <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
                         <div
-                            className={`h-full transition-all duration-500 ${score >= 55 ? 'bg-green-500' : score <= 45 ? 'bg-red-500' : 'bg-gray-600'}`}
+                            className={`h-full transition-all duration-500 ${score >= 55 ? 'bg-emerald-500' : score <= 45 ? 'bg-red-500' : 'bg-gray-600'}`}
                             style={{ width: `${score}%` }}
                         />
                     </div>
@@ -81,6 +83,39 @@ const SimpleSignalPanel: React.FC = () => {
                         </div>
                     </div>
                 )}
+
+                {/* Auto-Trade Gates */}
+                <div className="mt-3 pt-3 border-t border-gray-700/50">
+                    <div className="text-[9px] text-gray-400 uppercase tracking-widest mb-2 font-bold flex items-center justify-between">
+                        <span>Autonomous Execution Gates</span>
+                        <span className={`px-1.5 py-0.5 rounded-sm ${mode === 'autonomous' && score >= 65 && (activeConviction.bias_streak || 0) >= 5 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-800 text-gray-500'}`}>
+                            {mode === 'autonomous' && score >= 65 && (activeConviction.bias_streak || 0) >= 5 ? 'READY' : 'WAITING'}
+                        </span>
+                    </div>
+                    <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[10px]">
+                            <div className="flex items-center gap-1.5 text-gray-400">
+                                {mode === 'autonomous' ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <XCircle className="w-3 h-3 text-red-500" />}
+                                <span>Autonomous Mode</span>
+                            </div>
+                            <span className="font-mono text-gray-300">{mode === 'autonomous' ? 'ON' : 'OFF'}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px]">
+                            <div className="flex items-center gap-1.5 text-gray-400">
+                                {score >= 65 ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <XCircle className="w-3 h-3 text-yellow-500" />}
+                                <span>High Conviction (≥65)</span>
+                            </div>
+                            <span className="font-mono text-gray-300">{score}/65</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px]">
+                            <div className="flex items-center gap-1.5 text-gray-400">
+                                {(activeConviction.bias_streak || 0) >= 5 ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <XCircle className="w-3 h-3 text-yellow-500" />}
+                                <span>Directional Streak (≥5)</span>
+                            </div>
+                            <span className="font-mono text-gray-300">{activeConviction.bias_streak || 0}/5</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         );
     };
@@ -114,9 +149,9 @@ const SimpleSignalPanel: React.FC = () => {
                                 >
                                     <td className="py-1 font-bold text-white">{sym}</td>
                                     <td className="py-1 text-center">
-                                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${conv.bias === 'LONG' ? 'bg-green-400/20 text-green-400' :
-                                                conv.bias === 'SHORT' ? 'bg-red-400/20 text-red-400' :
-                                                    'bg-gray-700 text-gray-400'
+                                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${conv.bias === 'LONG' ? 'bg-emerald-400/20 text-emerald-400' :
+                                            conv.bias === 'SHORT' ? 'bg-red-400/20 text-red-400' :
+                                                'bg-gray-700 text-gray-400'
                                             }`}>
                                             {signalLabel}
                                         </span>

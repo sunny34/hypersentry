@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { TrendingUp, TrendingDown, Gavel, Sparkles, MessageSquare, AlertCircle, Quote } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface DebateMessage {
     id: string;
@@ -12,6 +13,7 @@ interface DebateMessage {
 }
 
 export default function BullBearDebate({ symbol }: { symbol: string }) {
+    const { token: authToken } = useAuth();
     const [messages, setMessages] = useState<DebateMessage[]>([]);
     const [isThinking, setIsThinking] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -37,7 +39,9 @@ export default function BullBearDebate({ symbol }: { symbol: string }) {
             setIsThinking(true);
             try {
                 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-                const res = await axios.get(`${apiUrl}/intel/debate/${symbol}`);
+                const headers: Record<string, string> = {};
+                if (authToken) headers.Authorization = `Bearer ${authToken}`;
+                const res = await axios.get(`${apiUrl}/intel/debate/${symbol}`, { headers });
                 if (res.data.messages) {
                     // Stagger the messages for effect
                     for (const msg of res.data.messages) {

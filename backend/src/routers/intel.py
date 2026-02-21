@@ -227,8 +227,9 @@ async def get_intel_nexus(
     
     full_signals = await nexus.get_alpha_confluence()
     
-    # 1. Pro / Admin Bypass
-    if user and (user.role == "pro" or user.is_admin):
+    # 1. Pro / Admin / Env Bypass
+    pro_bypass = os.getenv("PRO_BYPASS", "false").lower() == "true"
+    if pro_bypass or (user and (user.role == "pro" or user.is_admin)):
         return full_signals
 
     # 2. Apply Partial Transparency for Free Users
@@ -258,6 +259,7 @@ async def get_intel_nexus(
         
         processed_sig = sig.copy()
         processed_sig["token"] = obfuscated_token
+        processed_sig["id"] = sig.get("id") # Preserve unique ID for React keys
         processed_sig["is_obfuscated"] = True
         processed_sig["recommendation"] = "UPGRADE TO VIEW"
         
@@ -274,7 +276,7 @@ async def get_intel_nexus(
 
 from pydantic import BaseModel
 class DeobfuscateRequest(BaseModel):
-    token_obfuscated: str
+    id: str
 
 @router.post("/deobfuscate")
 async def deobfuscate_signal(
@@ -301,12 +303,12 @@ async def deobfuscate_signal(
     from src.intel.nexus import nexus
     all_signals = await nexus.get_alpha_confluence()
     
-    # Only reveal the specific signal that matches the obfuscated token pattern
-    # Obfuscation format: first char + asterisks (e.g., "B**" for "BTC")
-    obfuscated = request.token_obfuscated
+    # Only reveal the specific signal that matches the unique ID
+    # This prevents the ambiguity of obfuscated token patterns (e.g., BTC and BNB both being B**)
+    signal_id = request.id
     matching = [
         s for s in all_signals 
-        if len(s["token"]) == len(obfuscated) and s["token"][0] == obfuscated[0]
+        if s.get("id") == signal_id
     ]
     
     return matching if matching else all_signals[:1]  # Fallback to first signal if no exact match

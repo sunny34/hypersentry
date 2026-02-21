@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { useHyperliquidWS } from '../../hooks/useHyperliquidWS';
+import { useHyperliquidWS } from '@/contexts/HyperliquidWSContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Zap, Sparkles, UserCheck } from 'lucide-react';
 

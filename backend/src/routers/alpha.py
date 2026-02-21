@@ -160,19 +160,6 @@ async def _build_live_risk(
         active_correlations=float(getattr(risk_service, "active_positions", {}).get(symbol, 0.0)),
     )
 
-@router.get("/{symbol}", response_model=AlphaSignal)
-async def get_alpha_signals(symbol: str):
-    """
-    Returns the current Alpha Engine status for a given symbol.
-    Includes Price/OI Regime classification and Volatility Compression scoring.
-    """
-    signal = await alpha_service.generate_signal(symbol.upper())
-    if not signal:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Alpha state for {symbol} not initialized or inactive."
-        )
-    return signal
 
 @router.get("/footprint/{symbol}", response_model=FootprintResult)
 async def get_footprint(symbol: str):
@@ -442,6 +429,7 @@ async def get_alpha_state(symbol: str):
         "timestamp": state.timestamp,
     }
 
+
 @router.get("/debug/{symbol}")
 async def get_alpha_debug(symbol: str):
     """
@@ -579,4 +567,18 @@ async def autonomous_trigger(req: AutonomousTriggerRequest):
         "direction": req.direction,
         "conviction_score": req.conviction_score,
     }
+
+@router.get("/{symbol}", response_model=AlphaSignal)
+async def get_alpha_signals(symbol: str):
+    """
+    Returns the current Alpha Engine status for a given symbol.
+    Includes Price/OI Regime classification and Volatility Compression scoring.
+    """
+    signal = await alpha_service.generate_signal(symbol.upper())
+    if not signal:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Alpha state for {symbol} not initialized or inactive."
+        )
+    return signal
 

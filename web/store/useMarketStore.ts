@@ -103,7 +103,12 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
                     ...updateObj,
                     book: updatedBook,
                     trades: updatedTrades,
-                    walls: updatedWalls
+                    walls: updatedWalls,
+                    // Auto-stamp timestamps when book updates arrive
+                    ...(hasBookLevels ? {
+                        book_ts: Date.now(),
+                        updated_at: Date.now(),
+                    } : {}),
                 };
             }
 

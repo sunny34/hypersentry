@@ -74,7 +74,7 @@ export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMa
                 if (Array.isArray(backendRes.data)) {
                     backendIntel = backendRes.data.map((item: any) => ({
                         id: item.id || `intel-${Math.random()}`,
-                        title: item.title,
+                        title: (item.title || '').replace(/<[^>]*>?/gm, '').trim(),
                         url: item.url,
                         source: item.source || 'Intel',
                         published: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -89,9 +89,8 @@ export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMa
                 console.warn("Backend Intel unreachable, falling back to public feeds");
             }
 
-            // 2. Fetch from CryptoCompare as fallback/supplement
             const res = await axios.get(
-                `https://min-api.cryptocompare.com/data/v2/news/?categories=${symbol},Blockchain,Exchange,Market,Regulatory&excludeCategories=Sponsored`
+                `https://min-api.cryptocompare.com/data/v2/news/?categories=${symbol},Blockchain,Macro,Economy,Business,Fiat,Exchange,Market,Regulatory&excludeCategories=Sponsored`
             );
 
             let posCount = 0;
@@ -99,7 +98,8 @@ export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMa
             let neutCount = 0;
 
             const items: NewsItem[] = (res.data?.Data || []).slice(0, 15).map((item: any) => {
-                const title = item.title.toLowerCase();
+                const cleanTitle = (item.title || '').replace(/<[^>]*>?/gm, '').trim();
+                const title = cleanTitle.toLowerCase();
                 let sentiment: 'positive' | 'negative' | 'neutral' = 'neutral';
 
                 // Sentiment Heuristics
@@ -127,7 +127,7 @@ export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMa
 
                 const newItem: NewsItem = {
                     id: item.id.toString(),
-                    title: item.title,
+                    title: cleanTitle,
                     url: item.url,
                     source: item.source_info?.name || item.source,
                     published: new Date(item.published_on * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -195,7 +195,7 @@ export default function NewsFeed({ symbol, tokens = [], aiBias = 'neutral', onMa
         if (lastMessage?.type === 'intel_alpha' && Array.isArray(lastMessage.data)) {
             const incomingItems: NewsItem[] = lastMessage.data.map((item: any) => ({
                 id: item.id || `ws-${Math.random()}`,
-                title: item.title,
+                title: (item.title || '').replace(/<[^>]*>?/gm, '').trim(),
                 url: item.url,
                 source: item.source || 'Intel',
                 published: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),

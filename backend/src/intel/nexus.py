@@ -1,6 +1,7 @@
 import logging
 import datetime
 import asyncio
+import hashlib
 from typing import List, Dict, Any
 from src.intel.engine import engine as intel_engine
 from src.manager import TraderManager
@@ -214,6 +215,7 @@ class NexusEngine:
                 token = token.upper()
                 if token not in token_signals:
                     token_signals[token] = {
+                        "id": hashlib.sha256(token.encode()).hexdigest()[:12],
                         "token": token,
                         "alpha_score": 0,
                         "twap_delta": 0,

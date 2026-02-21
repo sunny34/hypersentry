@@ -4,6 +4,7 @@ import { useMarketStore, OrderBookLevel, Trade, LiquidityWall } from '@/store/us
 import { Activity, Zap, Shield, Target, ChevronDown, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { VirtualOrderBook } from './VirtualOrderBook';
 import { API_URL } from '@/lib/constants';
+import { formatCompact } from '@/lib/formatters';
 
 const snapshotFetchState: Record<
     string,
@@ -11,7 +12,87 @@ const snapshotFetchState: Record<
 > = {};
 const SNAPSHOT_FETCH_COOLDOWN_MS = 10_000;
 const SNAPSHOT_FETCH_MAX_BACKOFF_MS = 60_000;
-const ORDERBOOK_STALE_MS = 4000;
+const ORDERBOOK_STALE_MS = 2000; // Tighter stale detection (was 4s)
+const HL_WS_URL = 'wss://api.hyperliquid.xyz/ws';
+
+/**
+ * Direct Hyperliquid L2 WebSocket hook for sub-ms order book latency.
+ * Bypasses the backend aggregator entirely for the active coin.
+ */
+function useDirectL2(coin: string, updateFromAggregator: (data: Record<string, unknown>) => void) {
+    const wsRef = useRef<WebSocket | null>(null);
+    const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        if (!coin) return;
+        const symbol = coin.toUpperCase();
+        let cancelled = false;
+
+        const connect = () => {
+            if (cancelled) return;
+            try {
+                const ws = new WebSocket(HL_WS_URL);
+                wsRef.current = ws;
+
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({
+                        method: 'subscribe',
+                        subscription: { type: 'l2Book', coin: symbol }
+                    }));
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.channel === 'l2Book' && msg.data?.coin === symbol) {
+                            const levels = msg.data.levels;
+                            if (Array.isArray(levels) && levels.length >= 2) {
+                                updateFromAggregator({
+                                    [symbol]: {
+                                        book: levels,
+                                        book_ts: Date.now(),
+                                        updated_at: Date.now(),
+                                    }
+                                });
+                            }
+                        }
+                    } catch { /* best-effort parse */ }
+                };
+
+                ws.onclose = () => {
+                    if (!cancelled) {
+                        reconnectTimerRef.current = setTimeout(connect, 1000);
+                    }
+                };
+
+                ws.onerror = () => {
+                    ws.close();
+                };
+            } catch {
+                if (!cancelled) {
+                    reconnectTimerRef.current = setTimeout(connect, 2000);
+                }
+            }
+        };
+
+        connect();
+
+        return () => {
+            cancelled = true;
+            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+            if (wsRef.current) {
+                try {
+                    wsRef.current.send(JSON.stringify({
+                        method: 'unsubscribe',
+                        subscription: { type: 'l2Book', coin: symbol }
+                    }));
+                } catch { /* ignore */ }
+                wsRef.current.close();
+                wsRef.current = null;
+            }
+        };
+    }, [coin, updateFromAggregator]);
+}
 
 interface PremiumOrderBookProps {
     coin: string;
@@ -30,6 +111,9 @@ export default function PremiumOrderBook({
     const marketData = useMarketStore((state: any) => state.marketData[coin]);
     const updateFromAggregator = useMarketStore((state: any) => state.updateFromAggregator);
 
+    // Direct Hyperliquid L2 WS — sub-ms latency, bypasses backend relay
+    useDirectL2(coin, updateFromAggregator);
+
     const bids = useMemo(() => marketData?.book[0] || [], [marketData?.book]);
     const asks = useMemo(() => marketData?.book[1] || [], [marketData?.book]);
     const trades = useMemo(() => marketData?.trades || [], [marketData?.trades]);
@@ -41,8 +125,8 @@ export default function PremiumOrderBook({
     const bookAgeMs = bookTsMs > 0 ? Math.max(0, clockMs - bookTsMs) : Number.POSITIVE_INFINITY;
     const isBookStale = hasDepth && (bookTsMs <= 0 || bookAgeMs > ORDERBOOK_STALE_MS);
     const staleAgeSec = Number.isFinite(bookAgeMs) ? Math.floor(bookAgeMs / 1000) : null;
-    const displayBids = useMemo(() => (isBookStale ? [] : bids), [bids, isBookStale]);
-    const displayAsks = useMemo(() => (isBookStale ? [] : asks), [asks, isBookStale]);
+    const displayBids = bids;
+    const displayAsks = asks;
 
     const [view, setView] = useState<'depth' | 'trades' | 'flow'>('depth');
     const [precision, setPrecision] = useState(4);
@@ -144,10 +228,7 @@ export default function PremiumOrderBook({
     };
 
     const formatSize = (sz: string) => {
-        const size = parseFloat(sz);
-        if (size >= 1000) return `${(size / 1000).toFixed(1)}K`;
-        if (size >= 1) return size.toFixed(2);
-        return size.toFixed(4);
+        return formatCompact(sz);
     };
 
     // Fallback hydration path: if WS depth is missing/stale, fetch a snapshot from backend.
@@ -259,12 +340,17 @@ export default function PremiumOrderBook({
     return (
         <div className="flex flex-col h-full w-full bg-[var(--background)] text-[var(--foreground)] text-[10px] select-none overflow-hidden">
             {/* Header with Metrics */}
-            <div className="flex items-center justify-between px-3 py-2 bg-[var(--background)]/60 border-b border-[var(--glass-border)]">
+            {isBookStale && (
+                <div className="absolute inset-x-0 top-0 h-1 bg-red-500/50 flex animate-pulse z-[100]">
+                    <div className="w-full bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(0,0,0,0.5)_10px,rgba(0,0,0,0.5)_20px)]" />
+                </div>
+            )}
+            <div className={`flex items-center justify-between px-3 py-2 bg-[var(--background)]/60 border-b border-[var(--glass-border)] ${isBookStale ? 'border-red-500/50 bg-red-500/5 transition-colors' : ''}`}>
                 <div className="flex items-center gap-1.5 shrink-0">
                     <span className="text-[10px] font-black uppercase tracking-tight text-white leading-none">Order Book</span>
                     {isBookStale && (
-                        <span className="text-[8px] font-black uppercase tracking-wider text-rose-400">
-                            Stale {staleAgeSec !== null ? `${staleAgeSec}s` : ''}
+                        <span className="text-[8px] font-black uppercase tracking-wider text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded animate-pulse">
+                            STALE DATA {staleAgeSec !== null ? `(${staleAgeSec}s)` : ''}
                         </span>
                     )}
                     <div className="relative">
@@ -335,7 +421,7 @@ export default function PremiumOrderBook({
                             <option value="24h">24H</option>
                         </select>
                         <span className={`text-[9px] font-mono font-bold ${cvd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {cvd >= 0 ? '+' : ''}{cvd.toFixed(0)}
+                            {formatCompact(cvd)}
                         </span>
                         {recentDelta !== 0 && (
                             <span className={`text-[8px] font-mono animate-pulse ${recentDelta > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -453,7 +539,7 @@ export default function PremiumOrderBook({
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-[9px] font-black uppercase text-gray-500">Cumulative Volume Delta</span>
                                 <span className={`text-sm font-mono font-bold ${cvd >= 0 ? 'text-[var(--color-bullish)]' : 'text-[var(--color-bearish)]'}`}>
-                                    {cvd >= 0 ? '+' : ''}{cvd.toFixed(2)}
+                                    {formatCompact(cvd)}
                                 </span>
                             </div>
                             <div className="h-16 rounded-lg bg-[var(--background)]/30 relative overflow-hidden">

@@ -7,6 +7,8 @@ import { getApiUrl } from '@/lib/constants';
 
 const API_URL = getApiUrl();
 
+const stripHtml = (text: string) => (text || '').replace(/<[^>]*>?/gm, '').trim();
+
 interface AlphaItem {
     id: string;
     title: string;
@@ -16,7 +18,7 @@ interface AlphaItem {
     timestamp: string;
     source: string;
     is_high_impact: boolean;
-    metadata?: { symbol?: string; [key: string]: unknown };
+    metadata?: { symbol?: string;[key: string]: unknown };
 }
 
 export default function AlphaStream({ onSelectToken }: { onSelectToken: (symbol: string) => void }) {
@@ -31,7 +33,11 @@ export default function AlphaStream({ onSelectToken }: { onSelectToken: (symbol:
             try {
                 const res = await axios.get(`${API_URL}/intel/latest`);
                 if (Array.isArray(res.data)) {
-                    setItems(res.data);
+                    setItems(res.data.map((item: AlphaItem) => ({
+                        ...item,
+                        title: stripHtml(item.title),
+                        content: stripHtml(item.content),
+                    })));
                 }
                 fetchErrorLoggedRef.current = false;
             } catch {
@@ -102,21 +108,21 @@ export default function AlphaStream({ onSelectToken }: { onSelectToken: (symbol:
                             exit={{ opacity: 0, height: 0 }}
                             layout
                             className={`group relative p-3 rounded-lg border cursor-pointer transition-all hover:bg-white/5 active:scale-[0.98] ${item.sentiment === 'bullish' ? 'bg-emerald-500/5 border-emerald-500/10 hover:border-emerald-500/30' :
-                                    item.sentiment === 'bearish' ? 'bg-red-500/5 border-red-500/10 hover:border-red-500/30' :
-                                        'bg-gray-800/20 border-white/5 hover:border-white/10'
+                                item.sentiment === 'bearish' ? 'bg-red-500/5 border-red-500/10 hover:border-red-500/30' :
+                                    'bg-gray-800/20 border-white/5 hover:border-white/10'
                                 }`}
                             onClick={() => handleItemClick(item)}
                         >
                             {/* Sentiment Bar */}
                             <div className={`absolute left-0 top-3 bottom-3 w-0.5 rounded-r ${item.sentiment === 'bullish' ? 'bg-emerald-500' :
-                                    item.sentiment === 'bearish' ? 'bg-red-500' :
-                                        'bg-gray-600'
+                                item.sentiment === 'bearish' ? 'bg-red-500' :
+                                    'bg-gray-600'
                                 }`} />
 
                             <div className="flex items-start justify-between gap-2 mb-1 pl-2">
                                 <span className={`text-[10px] font-bold uppercase tracking-wide ${item.source === 'microstructure' ? 'text-blue-400' :
-                                        item.source === 'twitter' ? 'text-sky-400' :
-                                            'text-gray-400'
+                                    item.source === 'twitter' ? 'text-sky-400' :
+                                        'text-gray-400'
                                     }`}>
                                     {item.source}
                                 </span>

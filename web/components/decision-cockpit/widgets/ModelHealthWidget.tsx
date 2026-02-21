@@ -16,7 +16,7 @@ const ModelHealthWidget = () => {
         <div className="p-4 border border-gray-800 bg-gray-950/50 rounded flex flex-col space-y-3">
             <div className="flex justify-between items-center">
                 <span className="text-[10px] text-gray-500 uppercase tracking-widest">Model Intelligence</span>
-                <span className={`text-[10px] font-bold ${health === 'OPTIMAL' ? 'text-green-500' : 'text-yellow-500'}`}>{health}</span>
+                <span className={`text-[10px] font-bold ${health === 'OPTIMAL' ? 'text-emerald-500' : 'text-yellow-500'}`}>{health}</span>
             </div>
 
             <div className="flex flex-col">

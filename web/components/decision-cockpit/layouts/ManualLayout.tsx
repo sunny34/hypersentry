@@ -53,7 +53,7 @@ const ManualLayout = () => {
                 <div className="flex-1 bg-gray-950/20 p-4 sm:p-6 flex flex-col justify-center text-gray-700 text-[10px] font-mono uppercase">
                     <div className="text-gray-500 mb-2 tracking-widest">Telemetry</div>
                     <div className="space-y-1">
-                        <div>Stream: <span className={stream.status === 'live' ? 'text-green-500' : stream.status === 'degraded' ? 'text-yellow-500' : 'text-red-500'}>{stream.status}</span></div>
+                        <div>Stream: <span className={stream.status === 'live' ? 'text-emerald-500' : stream.status === 'degraded' ? 'text-yellow-500' : 'text-red-500'}>{stream.status}</span></div>
                         <div>Tracked symbols: <span className="text-gray-400">{trackedSymbols}</span></div>
                         <div>Execution events: <span className="text-gray-400">{logs.length}</span></div>
                     </div>

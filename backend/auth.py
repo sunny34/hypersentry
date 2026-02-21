@@ -158,6 +158,9 @@ async def require_user(
     return user
 
 
+# PRO Subscription Requirement Toggle
+REQUIRE_PRO_SUBSCRIPTION = os.getenv("REQUIRE_PRO_SUBSCRIPTION", "true").lower() == "true"
+
 async def require_pro_user(
     user: User = Depends(require_user),
     db: Session = Depends(get_db)
@@ -165,8 +168,11 @@ async def require_pro_user(
     """
     FastAPI dependency that REQUIRES 'pro' role.
     Raises 403 if authenticated but not pro.
-    Bypasses for admins.
+    Bypasses for admins or if REQUIRE_PRO_SUBSCRIPTION is false.
     """
+    if not REQUIRE_PRO_SUBSCRIPTION:
+        return user
+
     # 1. Admin Bypass (populated by get_current_user)
     if user.is_admin:
         return user

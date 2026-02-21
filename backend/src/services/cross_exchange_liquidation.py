@@ -128,6 +128,10 @@ class CrossExchangeLiquidationConsumer:
                     delay = self._get_reconnect_delay(exchange)
                     logger.info("Reconnecting to Binance in %.1f seconds", delay)
                     await asyncio.sleep(delay)
+            finally:
+                if exchange in self._sessions and self._sessions[exchange]:
+                    await self._sessions[exchange].close()
+                    del self._sessions[exchange]
 
     async def _process_binance_liquidation(self, data: dict):
         """Process Binance liquidation event."""
@@ -197,6 +201,10 @@ class CrossExchangeLiquidationConsumer:
                     delay = self._get_reconnect_delay(exchange)
                     logger.info("Reconnecting to Bybit in %.1f seconds", delay)
                     await asyncio.sleep(delay)
+            finally:
+                if exchange in self._sessions and self._sessions[exchange]:
+                    await self._sessions[exchange].close()
+                    del self._sessions[exchange]
 
     async def _process_bybit_liquidation(self, data: dict):
         """Process Bybit liquidation event."""

@@ -23,6 +23,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider } from 'wagmi';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { TerminalSettingsProvider } from '../contexts/TerminalSettingsContext';
+import { useAlphaStream } from '../hooks/useAlphaStream';
 import '@rainbow-me/rainbowkit/styles.css';
 
 const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID;
@@ -62,6 +63,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     React.useEffect(() => {
         setMounted(true);
     }, []);
+
+    // Initialize global WebSocket connection for Market Data and Alpha Engine
+    useAlphaStream();
 
     return (
         <WagmiProvider config={config}>

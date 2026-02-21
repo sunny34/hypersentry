@@ -27,6 +27,7 @@ interface BacktestResult {
     equityCurve: { time: string; value: number }[];
     recommendation: 'long' | 'short' | 'neutral';
     entryPrice: number;
+    monteCarloPaths?: { time: number;[key: string]: number }[];
 }
 
 export default function StrategySimulator({ symbol, currentPrice, fundingRate, onCopyTrade }: StrategySimulatorProps) {
@@ -34,6 +35,7 @@ export default function StrategySimulator({ symbol, currentPrice, fundingRate, o
     const [isRunning, setIsRunning] = useState(false);
     const [result, setResult] = useState<BacktestResult | null>(null);
     const [showParams, setShowParams] = useState(true);
+    const [view, setView] = useState<'backtest' | 'montecarlo'>('backtest');
 
     // Strategy Parameters
     const [params, setParams] = useState({
@@ -58,23 +60,57 @@ export default function StrategySimulator({ symbol, currentPrice, fundingRate, o
             });
 
             if (res.data.error) throw new Error(res.data.error);
-            setResult(res.data);
+
+            // Generate Monte Carlo paths locally for visualization depth
+            const mcPaths = generateMonteCarlo(res.data.winRate || 50, params.risk.leverage, params.risk.takeProfit, params.risk.stopLoss);
+
+            setResult({
+                ...res.data,
+                monteCarloPaths: mcPaths
+            });
         } catch (e) {
             console.error("Backtest failed:", e);
+            const demoPnL = -2.4;
+            const demoWinRate = 45;
+            const mcPaths = generateMonteCarlo(demoWinRate, params.risk.leverage, params.risk.takeProfit, params.risk.stopLoss);
+
             setResult({
-                pnl: -2.4,
-                winRate: 45,
+                pnl: demoPnL,
+                winRate: demoWinRate,
                 trades: 12,
                 params: 'Demo Mode (Backend Unavailable)',
                 equityCurve: Array.from({ length: 20 }, (_, i) => ({ time: `T-${20 - i}`, value: 1000 + Math.random() * 100 - 50 })),
                 recommendation: 'neutral',
                 entryPrice: currentPrice,
-                reasoning: "Strategy Lab: Adjust parameters to find edge."
+                reasoning: "Strategy Lab: Adjust parameters to find edge.",
+                monteCarloPaths: mcPaths
             });
         } finally {
             setIsRunning(false);
         }
     }, [selectedStrategy, symbol, params, fundingRate, currentPrice]);
+
+    const generateMonteCarlo = (winRate: number, leverage: number, tp: number, sl: number) => {
+        const paths = 20;
+        const steps = 30;
+        const results = [];
+
+        for (let i = 0; i <= steps; i++) {
+            const step: any = { time: i };
+            for (let p = 0; p < paths; p++) {
+                if (i === 0) {
+                    step[`path${p}`] = 1000;
+                } else {
+                    const prev = results[i - 1][`path${p}`];
+                    const win = Math.random() * 100 < winRate;
+                    const change = win ? (tp / 100 * leverage) : (-sl / 100 * leverage);
+                    step[`path${p}`] = prev * (1 + change);
+                }
+            }
+            results.push(step);
+        }
+        return results;
+    };
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -250,11 +286,14 @@ export default function StrategySimulator({ symbol, currentPrice, fundingRate, o
                                 </div>
                                 <div className="bg-white/5 border border-white/10 p-3 rounded-xl">
                                     <div className="text-[8px] text-gray-500 uppercase font-black tracking-widest mb-1.5 flex items-center gap-1.5">
-                                        <Activity className="w-3 h-3 text-amber-400" /> Sharpe Ratio
+                                        <Target className="w-3 h-3 text-purple-400" /> Success Prob.
                                     </div>
-                                    <div className={`text-xl font-black ${result.sharpeRatio && result.sharpeRatio > 2 ? 'text-amber-400' : 'text-white'}`}>
-                                        {result.sharpeRatio?.toFixed(2) || '1.14'}
-                                        <span className="text-[10px] text-gray-500 font-bold block uppercase">Risk Adj.</span>
+                                    <div className={`text-xl font-black text-white`}>
+                                        {result.monteCarloPaths ?
+                                            Math.round((result.monteCarloPaths[result.monteCarloPaths.length - 1].path0 > 1000 ? 1 : 0 +
+                                                result.monteCarloPaths[result.monteCarloPaths.length - 1].path1 > 1000 ? 1 : 0 +
+                                                    result.monteCarloPaths[result.monteCarloPaths.length - 1].path2 > 1000 ? 1 : 0) / 3 * 100) : 58}%
+                                        <span className="text-[10px] text-gray-500 font-bold block uppercase">Monte Carlo</span>
                                     </div>
                                 </div>
                             </div>
@@ -267,42 +306,77 @@ export default function StrategySimulator({ symbol, currentPrice, fundingRate, o
                                         <span className="text-[10px] font-black uppercase tracking-widest text-gray-300">Portfolio Growth Simulation</span>
                                     </div>
                                     <div className="flex gap-4">
-                                        <div className="flex items-center gap-1.5">
-                                            <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_6px_#3b82f6]"></div>
-                                            <span className="text-[8px] text-gray-500 font-bold uppercase">Equity (USD)</span>
-                                        </div>
+                                        <button
+                                            onClick={() => setView('backtest')}
+                                            className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded transition-all ${view === 'backtest' ? 'bg-blue-500 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                                        >
+                                            Historical
+                                        </button>
+                                        <button
+                                            onClick={() => setView('montecarlo')}
+                                            className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded transition-all ${view === 'montecarlo' ? 'bg-purple-500 text-white shadow-[0_0_10px_rgba(168,85,247,0.4)]' : 'text-gray-500 hover:text-gray-300'}`}
+                                        >
+                                            Monte Carlo
+                                        </button>
                                     </div>
                                 </div>
                                 <div className="flex-1 w-full translate-x-[-20px]">
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <AreaChart data={result.equityCurve}>
-                                            <defs>
-                                                <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
-                                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                                                </linearGradient>
-                                            </defs>
-                                            <XAxis hide dataKey="time" />
-                                            <YAxis
-                                                domain={['dataMin - 50', 'dataMax + 50']}
-                                                tick={{ fontSize: 8, fill: '#4b5563', fontWeight: 'bold' }}
-                                                axisLine={false}
-                                                tickLine={false}
-                                                tickFormatter={(val) => `$${val.toFixed(0)}`}
-                                            />
-                                            <Tooltip
-                                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }}
-                                                itemStyle={{ color: '#3b82f6' }}
-                                            />
-                                            <Area
-                                                type="stepAfter"
-                                                dataKey="value"
-                                                stroke="#3b82f6"
-                                                strokeWidth={2}
-                                                fillOpacity={1}
-                                                fill="url(#colorValue)"
-                                            />
-                                        </AreaChart>
+                                        {view === 'backtest' ? (
+                                            <AreaChart data={result.equityCurve}>
+                                                <defs>
+                                                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
+                                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                                    </linearGradient>
+                                                </defs>
+                                                <XAxis hide dataKey="time" />
+                                                <YAxis
+                                                    domain={['dataMin - 50', 'dataMax + 50']}
+                                                    tick={{ fontSize: 8, fill: '#4b5563', fontWeight: 'bold' }}
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                    tickFormatter={(val) => `$${val.toFixed(0)}`}
+                                                />
+                                                <Tooltip
+                                                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }}
+                                                    itemStyle={{ color: '#3b82f6' }}
+                                                />
+                                                <Area
+                                                    type="stepAfter"
+                                                    dataKey="value"
+                                                    stroke="#3b82f6"
+                                                    strokeWidth={2}
+                                                    fillOpacity={1}
+                                                    fill="url(#colorValue)"
+                                                />
+                                            </AreaChart>
+                                        ) : (
+                                            <LineChart data={result.monteCarloPaths}>
+                                                <XAxis hide dataKey="time" />
+                                                <YAxis
+                                                    domain={['dataMin - 100', 'dataMax + 100']}
+                                                    tick={{ fontSize: 8, fill: '#4b5563', fontWeight: 'bold' }}
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                    tickFormatter={(val) => `$${val.toFixed(0)}`}
+                                                />
+                                                <Tooltip
+                                                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }}
+                                                />
+                                                {Array.from({ length: 15 }).map((_, i) => (
+                                                    <Line
+                                                        key={i}
+                                                        type="monotone"
+                                                        dataKey={`path${i}`}
+                                                        stroke={i === 0 ? "#a855f7" : "#a855f744"}
+                                                        strokeWidth={i === 0 ? 2 : 1}
+                                                        dot={false}
+                                                        isAnimationActive={false}
+                                                    />
+                                                ))}
+                                            </LineChart>
+                                        )}
                                     </ResponsiveContainer>
                                 </div>
                             </div>

@@ -118,17 +118,23 @@ class ConvictionEngine:
         if vol_desc:
             explanations.append(vol_desc)
 
-        # ── aggregate ──
+        # ── aggregate (excluding volatility, which acts as multiplier) ──
         raw_score = (
             (regime_score * w_reg)
             + (liq_score * w_liq)
             + (foot_score * w_foot)
             + (funding_score * w_fund)
-            + (vol_score * w_vol)
         )
 
-        total_weight = w_reg + w_liq + w_foot + w_fund + w_vol
-        normalized_score = raw_score / total_weight
+        # Normalise against directional weights only
+        directional_weight = w_reg + w_liq + w_foot + w_fund
+        normalized_score = raw_score / directional_weight if directional_weight > 0 else 0.0
+
+        # ── volatility amplifier (not directional) ──
+        # Compression → push toward extremes (amplify conviction)
+        # Expansion   → dampen (move already started, reduce confidence)
+        vol_multiplier = vol_score  # returned from _calculate_volatility_score
+        normalized_score *= vol_multiplier
 
         # ── time-decay ──
         ts_now = int(time.time() * 1000)
@@ -302,33 +308,27 @@ class ConvictionEngine:
         """
         Volatility is a MAGNITUDE AMPLIFIER, not a directional signal.
 
-        • Compression  → big move coming → amplify existing bias (+0.0)
-          but boost overall conviction confidence (separate from score)
-        • Expansion    → move in progress → no directional change
-        • Normal       → baseline
-
-        The score returned is 0.0 (neutral) always.
-        Instead, we use compression_score as a multiplier on the
-        OTHER components, returned via the description for logging.
+        Returns a multiplier that is applied to the aggregate score:
+          • Compression  → 1.15 to 1.40 (amplify existing bias)
+          • Expansion    → 0.75 to 0.90 (dampen — move already started)
+          • Normal       → 1.0 (no change)
         """
         compression = getattr(sig, "compression_score", 0.5)
 
         if sig.volatility_regime == "COMPRESSION":
-            # FIX: Direction-neutral — compression is NOT bullish
-            # High compression = big move imminent; we amplify conviction
-            # by moving scale toward extremes without picking direction.
-            # Score of 0.0 keeps it neutral; the amplification happens
-            # via the non-linear pow(0.7) on the aggregate.
-            score = 0.0
-            desc = f"Volatility Compression ({compression:.0%}): breakout imminent — signals amplified"
+            # Higher compression = bigger imminent move = more amplification
+            # compression_score is 0-1; map to 1.15–1.40
+            multiplier = 1.15 + (compression * 0.25)
+            desc = f"Volatility Compression ({compression:.0%}): signals amplified ×{multiplier:.2f}"
         elif sig.volatility_regime == "EXPANSION":
-            score = 0.0
-            desc = "Volatility Expansion: move in progress"
+            # Expansion = move in progress, dampen conviction
+            multiplier = 0.85
+            desc = "Volatility Expansion: conviction dampened ×0.85"
         else:
-            score = 0.0
+            multiplier = 1.0
             desc = "Volatility Stable"
 
-        return score, desc
+        return multiplier, desc
 
     # ═══════════════════════════════════════════════════════════════
     # Utility helpers

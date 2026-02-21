@@ -1,11 +1,9 @@
 import { memo } from 'react';
+import { formatCompact } from '@/lib/formatters';
 
 // Utility: Format numbers (e.g., 20000 -> 20k)
 const formatNumber = (num: any) => {
-    if (num === undefined || num === null) return '0.00';
-    const n = typeof num === 'string' ? parseFloat(num) : num;
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-    return n.toFixed(2);
+    return formatCompact(num);
 };
 
 interface OrderBookRowProps {
@@ -63,8 +61,8 @@ export const VirtualOrderBook = ({
     midPrice?: number,
     onSelectPrice?: (px: string) => void
 }) => {
-    const safeBids = Array.isArray(bids) ? bids.slice(0, 20) : [];
-    const safeAsks = Array.isArray(asks) ? asks.slice(0, 20) : [];
+    const safeBids = Array.isArray(bids) ? bids.slice(0, 15) : [];
+    const safeAsks = Array.isArray(asks) ? asks.slice(0, 15) : [];
 
     const maxSize = Math.max(
         ...safeBids.map(b => parseFloat(b.sz)),
@@ -96,9 +94,9 @@ export const VirtualOrderBook = ({
     });
 
     return (
-        <div className="flex flex-col h-full w-full overflow-hidden">
+        <div className="absolute inset-0 grid grid-rows-[minmax(0,1fr)_auto_minmax(0,1fr)] overflow-hidden bg-black/40">
             {/* Asks (Sells) - Top part */}
-            <div className="flex-1 flex flex-col justify-end overflow-hidden">
+            <div className="flex flex-col justify-end overflow-y-auto scrollbar-hide border-b border-white/5 min-h-0 bg-red-500/[0.02]">
                 {[...asksWithTotal].reverse().map((ask, i) => (
                     <OrderBookRow
                         key={`ask-${ask.px}-${i}`}
@@ -114,19 +112,19 @@ export const VirtualOrderBook = ({
             </div>
 
             {/* Mid Price Spread Bar */}
-            <div className="py-2 my-0.5 bg-white/5 border-y border-white/5 flex flex-col items-center justify-center shrink-0">
-                <span className="text-sm font-black text-white leading-none">
+            <div className="py-2 bg-black border-y border-white/10 flex flex-col items-center justify-center shrink-0 z-10 shadow-lg">
+                <span className="text-sm font-black text-white leading-none tracking-tighter">
                     {midPrice > 0 ? midPrice.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision }) : '-'}
                 </span>
                 {safeAsks.length > 0 && safeBids.length > 0 && (
-                    <span className="text-[8px] text-gray-500 font-bold uppercase tracking-widest mt-1">
+                    <span className="text-[8px] text-gray-500 font-bold uppercase tracking-widest mt-1 opacity-70">
                         Spread: {(parseFloat(safeAsks[0].px) - parseFloat(safeBids[0].px)).toFixed(precision)}
                     </span>
                 )}
             </div>
 
             {/* Bids (Buys) - Bottom part */}
-            <div className="flex-1 overflow-hidden">
+            <div className="overflow-y-auto scrollbar-hide border-t border-transparent min-h-0 bg-emerald-500/[0.02]">
                 {bidsWithTotal.map((bid, i) => (
                     <OrderBookRow
                         key={`bid-${bid.px}-${i}`}

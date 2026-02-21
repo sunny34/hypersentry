@@ -22,6 +22,21 @@ export interface ConvictionData {
     realized_vol: number;
     timestamp: number;
     explanation?: string[];
+    reasoning?: string;
+    components?: Record<string, number>;
+    // Telemetry from backend AI
+    footprint?: {
+        sweep?: { event?: 'BUY_SWEEP' | 'SELL_SWEEP'; strength: number; levels_consumed: number };
+        absorption?: { event?: 'BUY_ABSORPTION' | 'SELL_ABSORPTION'; strength: number };
+        imbalance?: { imbalance_ratio: number; z_score: number; dominance: 'BUY_DOMINANT' | 'SELL_DOMINANT' | 'NEUTRAL' };
+        impulse?: { event?: 'BULLISH_IMPULSE' | 'BEARISH_IMPULSE'; strength: number };
+    };
+    liquidation?: {
+        dominant_side: 'SHORT_SQUEEZE' | 'LONG_SQUEEZE' | 'BALANCED';
+        imbalance_ratio: number;
+        upside: Record<string, number>;
+        downside: Record<string, number>;
+    };
     // Stability tracking
     bias_streak?: number; // How many consecutive readings on same side
     last_bias_change?: number; // Timestamp of last bias change

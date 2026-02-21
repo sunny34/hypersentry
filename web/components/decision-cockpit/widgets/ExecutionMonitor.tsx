@@ -8,7 +8,7 @@ const ExecutionMonitor = () => {
 
     const getTypeColor = (type: string) => {
         switch (type) {
-            case 'EXEC': return 'text-green-500';
+            case 'EXEC': return 'text-emerald-500';
             case 'PLAN': return 'text-blue-500';
             case 'INTEL': return 'text-cyan-400';
             case 'SYSTEM': return 'text-yellow-500';
@@ -22,7 +22,7 @@ const ExecutionMonitor = () => {
     };
 
     const streamClass = stream.status === 'live'
-        ? 'text-green-500'
+        ? 'text-emerald-500'
         : stream.status === 'degraded'
             ? 'text-yellow-500'
             : 'text-red-500';

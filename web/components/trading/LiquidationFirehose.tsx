@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { useHyperliquidWS } from '@/hooks/useHyperliquidWS';
+import { useHyperliquidWS } from '@/contexts/HyperliquidWSContext';
 import { Skull, TrendingDown, TrendingUp, Zap, Activity, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { terminalSound } from '@/utils/sounds';
+import { List } from 'react-window';
 
 interface Liquidation {
     coin: string;
@@ -20,6 +22,17 @@ export default function LiquidationFirehose() {
     useEffect(() => {
         subscribe({ type: 'liquidations' });
     }, [subscribe]);
+
+    // Handle Sonar Pulses for Whale Liquidations
+    useEffect(() => {
+        if (liquidations.length > 0) {
+            const latest = liquidations[0];
+            const val = parseFloat(latest.sz) * parseFloat(latest.px);
+            if (val >= 1000000) {
+                terminalSound.playLiquidationAlert();
+            }
+        }
+    }, [liquidations]);
 
     // Aggregate stats
     const stats = useMemo(() => {
@@ -57,6 +70,60 @@ export default function LiquidationFirehose() {
         if (val >= 1000000) return `$${(val / 1000000).toFixed(2)}M`;
         if (val >= 1000) return `$${(val / 1000).toFixed(0)}K`;
         return `$${val.toFixed(0)}`;
+    };
+
+    const Row = ({ index, style }: { index: number, style: React.CSSProperties }) => {
+        const liq = liquidations[index];
+        const isLong = liq.side === 'S';
+        const val = parseFloat(liq.sz) * parseFloat(liq.px);
+        const isWhale = val >= 1000000;
+
+        return (
+            <div style={style} className="px-3 py-1">
+                <a
+                    href={`https://app.hyperliquid.xyz/explorer/history/${liq.coin}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`group relative h-full flex items-center justify-between gap-4 p-3 rounded-xl border transition-all duration-500 cursor-pointer
+                        ${isLong
+                            ? 'bg-gradient-to-r from-[var(--color-bearish)]/10 to-transparent border-[var(--color-bearish)]/10 hover:border-[var(--color-bearish)]/30'
+                            : 'bg-gradient-to-r from-[var(--color-bullish)]/10 to-transparent border-[var(--color-bullish)]/10 hover:border-[var(--color-bullish)]/30'}
+                        ${isWhale ? 'ring-1 ring-[var(--color-accent-orange)]/20 shadow-[0_0_20px_var(--color-accent-orange)]/5' : ''}`}
+                >
+                    <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${isLong ? 'bg-[var(--color-bearish)]/20 text-[var(--color-bearish)]' : 'bg-[var(--color-bullish)]/20 text-[var(--color-bullish)]'}`}>
+                                {isLong ? <TrendingDown className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
+                            </div>
+                            <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[13px] font-black text-white tracking-tight">{liq.coin}</span>
+                                    {isWhale && <span className="text-[7px] bg-[var(--color-accent-orange)] text-black px-1 rounded-sm font-black uppercase tracking-tighter">Whale</span>}
+                                </div>
+                                <span className={`text-[8px] font-black uppercase tracking-widest ${isLong ? 'text-[var(--color-bearish)]/70' : 'text-[var(--color-bullish)]/70'}`}>
+                                    {isLong ? 'Long REKT' : 'Short REKT'}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="text-right flex flex-col items-end">
+                            <div className="flex items-center gap-1">
+                                <span className={`text-[13px] font-mono font-black ${isLong ? 'text-[var(--color-bearish)]' : 'text-[var(--color-bullish)]'}`}>
+                                    ${formatValue(liq)}
+                                </span>
+                            </div>
+                            <span className="text-[9px] text-gray-500 font-mono font-medium tracking-tighter uppercase">
+                                @ {parseFloat(liq.px).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                    </div>
+                    {/* Progress background bar for size intensity */}
+                    <div
+                        className={`absolute bottom-0 left-0 h-[1px] transition-all duration-1000 ${isLong ? 'bg-[var(--color-bearish)]/40' : 'bg-[var(--color-bullish)]/40'}`}
+                        style={{ width: `${Math.min((val / 100000) * 100, 100)}%` }}
+                    />
+                </a>
+            </div>
+        );
     };
 
     return (
@@ -99,89 +166,33 @@ export default function LiquidationFirehose() {
                 <div className="flex flex-col items-center border-l border-white/5">
                     <span className="text-[8px] text-gray-500 font-bold uppercase">Stress</span>
                     <span className={`text-[10px] font-black uppercase ${stats.stressLevel === 'HIGH' ? 'text-[var(--color-bearish)] animate-pulse' :
-                            stats.stressLevel === 'MODERATE' ? 'text-[var(--color-accent-orange)]' : 'text-gray-400'
+                        stats.stressLevel === 'MODERATE' ? 'text-[var(--color-accent-orange)]' : 'text-gray-400'
                         }`}>{stats.stressLevel}</span>
                 </div>
             </div>
 
-            <div
-                ref={scrollRef}
-                className="flex-1 overflow-y-auto scrollbar-hide p-3 space-y-2"
-            >
-                <AnimatePresence initial={false}>
-                    {liquidations.length === 0 ? (
-                        <motion.div
-                            key="empty"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="h-full flex flex-col items-center justify-center space-y-3"
-                        >
-                            <div className="relative">
-                                <Zap className="w-12 h-12 text-gray-800" />
-                                <div className="absolute inset-0 bg-[var(--color-accent-orange)]/5 blur-2xl rounded-full" />
-                            </div>
-                            <div className="flex flex-col items-center">
-                                <span className="text-[10px] uppercase font-black tracking-[0.3em] text-gray-600">Awaiting Volatility</span>
-                                <span className="text-[8px] uppercase font-bold text-gray-700 mt-1 italic tracking-widest">Monitoring 100+ Perps</span>
-                            </div>
-                        </motion.div>
-                    ) : (
-                        liquidations.map((liq) => {
-                            const isLong = liq.side === 'S';
-                            const val = parseFloat(liq.sz) * parseFloat(liq.px);
-                            const isWhale = val >= 1000000;
-
-                            return (
-                                <motion.a
-                                    key={liq.id || `${liq.coin}-${liq.time}-${Math.random()}`}
-                                    initial={{ opacity: 0, x: 20, filter: 'blur(10px)' }}
-                                    animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
-                                    href={`https://app.hyperliquid.xyz/explorer/history/${liq.coin}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className={`group relative p-3 rounded-xl border transition-all duration-500 block cursor-pointer
-                                        ${isLong
-                                            ? 'bg-gradient-to-r from-[var(--color-bearish)]/10 to-transparent border-[var(--color-bearish)]/10 hover:border-[var(--color-bearish)]/30'
-                                            : 'bg-gradient-to-r from-[var(--color-bullish)]/10 to-transparent border-[var(--color-bullish)]/10 hover:border-[var(--color-bullish)]/30'}
-                                        ${isWhale ? 'ring-1 ring-[var(--color-accent-orange)]/20 shadow-[0_0_20px_var(--color-accent-orange)]/5' : ''}`}
-                                >
-                                    <div className="flex items-center justify-between gap-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`p-2 rounded-lg ${isLong ? 'bg-[var(--color-bearish)]/20 text-[var(--color-bearish)] shadow-[0_0_10px_var(--color-bearish)]/20' : 'bg-[var(--color-bullish)]/20 text-[var(--color-bullish)] shadow-[0_0_10px_var(--color-bullish)]/20'}`}>
-                                                {isLong ? <TrendingDown className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[13px] font-black text-white tracking-tight">{liq.coin}</span>
-                                                    {isWhale && <span className="text-[7px] bg-[var(--color-accent-orange)] text-black px-1 rounded-sm font-black uppercase tracking-tighter">Whale</span>}
-                                                </div>
-                                                <span className={`text-[8px] font-black uppercase tracking-widest ${isLong ? 'text-[var(--color-bearish)]/70' : 'text-[var(--color-bullish)]/70'}`}>
-                                                    {isLong ? 'Long REKT' : 'Short REKT'}
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <div className="text-right flex flex-col items-end">
-                                            <div className="flex items-center gap-1">
-                                                <span className={`text-[13px] font-mono font-black ${isLong ? 'text-[var(--color-bearish)]' : 'text-[var(--color-bullish)]'}`}>
-                                                    ${formatValue(liq)}
-                                                </span>
-                                            </div>
-                                            <span className="text-[9px] text-gray-500 font-mono font-medium tracking-tighter uppercase">
-                                                @ {parseFloat(liq.px).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    {/* Progress background bar for size intensity */}
-                                    <div
-                                        className={`absolute bottom-0 left-0 h-[1px] transition-all duration-1000 ${isLong ? 'bg-[var(--color-bearish)]/40' : 'bg-[var(--color-bullish)]/40'}`}
-                                        style={{ width: `${Math.min((val / 100000) * 100, 100)}%` }}
-                                    />
-                                </motion.a>
-                            );
-                        })
-                    )}
-                </AnimatePresence>
+            <div className="flex-1 overflow-hidden relative">
+                {liquidations.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center space-y-3">
+                        <div className="relative">
+                            <Zap className="w-12 h-12 text-gray-800" />
+                            <div className="absolute inset-0 bg-[var(--color-accent)]/5 blur-2xl rounded-full" />
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <span className="text-[10px] uppercase font-black tracking-[0.3em] text-gray-600">Awaiting Volatility</span>
+                            <span className="text-[8px] uppercase font-bold text-gray-700 mt-1 italic tracking-widest">Monitoring 100+ Perps</span>
+                        </div>
+                    </div>
+                ) : (
+                    <List
+                        rowCount={liquidations.length}
+                        rowHeight={72}
+                        rowComponent={Row as any}
+                        rowProps={{} as any}
+                        className="scrollbar-hide"
+                        style={{ height: '100%', width: '100%' }}
+                    />
+                )}
             </div>
         </div>
     );

@@ -115,6 +115,9 @@ class RealTimeLiquidationFetcher:
                 if self._ws:
                     await self._ws.close()
                     self._ws = None
+                if self._session:
+                    await self._session.close()
+                    self._session = None
 
     async def _process_liquidation(self, data: dict):
         """Process a liquidation event from WebSocket."""

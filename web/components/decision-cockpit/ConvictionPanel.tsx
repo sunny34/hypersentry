@@ -32,9 +32,9 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
             return {
                 label: 'HIGH CONVICTION',
                 detail: 'Significant edge detected',
-                scoreClass: 'text-green-500',
-                badgeClass: 'border-green-500/60 bg-green-500/10 text-green-400',
-                glowClass: 'bg-green-500'
+                scoreClass: 'text-emerald-500',
+                badgeClass: 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400',
+                glowClass: 'bg-emerald-500'
             };
         }
         if (score >= 60) {
@@ -66,7 +66,7 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
 
     const getProbInference = (up: number, down: number) => {
         const diff = up - down;
-        if (diff > 0.15) return { label: "UPSIDE ASYMMETRY", textClass: "text-green-500", fillClass: "bg-green-500" };
+        if (diff > 0.15) return { label: "UPSIDE ASYMMETRY", textClass: "text-emerald-500", fillClass: "bg-emerald-500" };
         if (diff < -0.15) return { label: "DOWNSIDE RISK", textClass: "text-red-500", fillClass: "bg-red-500" };
         return { label: "BALANCED", textClass: "text-gray-500", fillClass: "bg-gray-500" };
     };
@@ -89,7 +89,7 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
     const ageSec = Math.max(0, Math.floor((now - normalizedUpdateTs) / 1000));
     const streamState = stream.connected ? stream.status.toUpperCase() : 'OFFLINE';
     const streamClass = stream.status === 'live'
-        ? 'text-green-400'
+        ? 'text-emerald-400'
         : stream.status === 'degraded'
             ? 'text-yellow-400'
             : stream.status === 'stale'
@@ -133,7 +133,7 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
                 <div className="text-gray-500 text-[10px] uppercase tracking-widest mb-2 font-bold">System Directive</div>
                 <div className="text-base sm:text-xl font-mono text-white leading-relaxed">
                     {conviction.score >= 60 ? (
-                        <>High probability upside move. Allocate <span className="text-blue-400">{risk?.risk_percent_equity || '1.5'}%</span> equity with <span className="text-green-500">{execution?.strategy || 'Hybrid'}</span> execution.</>
+                        <>High probability upside move. Allocate <span className="text-blue-400">{risk?.risk_percent_equity || '1.5'}%</span> equity with <span className="text-emerald-500">{execution?.strategy || 'Hybrid'}</span> execution.</>
                     ) : conviction.score <= 40 ? (
                         <>Downside pressure identified. System recommends <span className="text-red-500">Short Bias</span>. High urgency execution.</>
                     ) : (
@@ -182,7 +182,7 @@ const ConvictionPanel = ({ symbol }: { symbol: string }) => {
                 </div>
                 <div>
                     <div className="text-gray-600 mb-1 uppercase tracking-widest">Model Health</div>
-                    <div className={health === 'OPTIMAL' ? 'text-green-500 font-bold' : 'text-yellow-500 font-bold'}>
+                    <div className={health === 'OPTIMAL' ? 'text-emerald-500 font-bold' : 'text-yellow-500 font-bold'}>
                         {health} ({calibrationPct.toFixed(1)}%)
                     </div>
                 </div>

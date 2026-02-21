@@ -1,5 +1,5 @@
 'use client';
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 
 export interface TabConfig {
     id: string;
@@ -19,6 +19,8 @@ interface TerminalSettings {
     panels: PanelConfig[];
     theme: 'dark' | 'glass' | 'midnight';
     autoPilotEnabled: boolean;
+    accentColor: 'emerald' | 'blue' | 'amber' | 'purple';
+    panelSizes: Record<string, any>;
 }
 
 interface TerminalSettingsContextType {
@@ -28,6 +30,13 @@ interface TerminalSettingsContextType {
     updateTheme: (theme: TerminalSettings['theme']) => void;
     toggleAutoPilot: () => void;
     resetSettings: () => void;
+    updateAccentColor: (color: TerminalSettings['accentColor']) => void;
+    updatePanelSizes: (groupId: string, sizes: any) => void;
+    saveLayout: (name: string) => void;
+    loadLayout: (name: string) => void;
+    deleteLayout: (name: string) => void;
+    currentLayoutName: string;
+    layouts: Record<string, TerminalSettings>;
 }
 
 const DEFAULT_TABS: TabConfig[] = [
@@ -35,13 +44,11 @@ const DEFAULT_TABS: TabConfig[] = [
     { id: 'orders', label: 'Orders', enabled: true },
     { id: 'analysis', label: 'AI Intel', enabled: true },
     { id: 'twap', label: 'TWAP Intel', enabled: true },
-    { id: 'nexus', label: 'Nexus', enabled: true },
-    { id: 'pro', label: 'Pro', enabled: true },
+    { id: 'ai', label: 'AI Command', enabled: true },
     { id: 'lab', label: 'Lab', enabled: true },
     { id: 'predictions', label: 'Predictions', enabled: true },
     { id: 'cohorts', label: 'Social', enabled: true },
     { id: 'news', label: 'News', enabled: true },
-    { id: 'liquidations', label: 'Firehose', enabled: true },
 ];
 
 const DEFAULT_PANELS: PanelConfig[] = [
@@ -58,6 +65,9 @@ interface StoredSettings {
     panels?: Array<Pick<PanelConfig, 'id' | 'enabled'>>;
     theme?: TerminalSettings['theme'];
     autoPilotEnabled?: boolean;
+    layouts?: Record<string, TerminalSettings>;
+    currentLayoutName?: string;
+    panelSizes?: Record<string, any>;
 }
 
 const DEFAULT_SETTINGS: TerminalSettings = {
@@ -65,20 +75,39 @@ const DEFAULT_SETTINGS: TerminalSettings = {
     panels: DEFAULT_PANELS,
     theme: 'dark',
     autoPilotEnabled: false,
+    accentColor: 'emerald',
+    panelSizes: {
+        'main-group': [70, 30],
+        'top-group': [60, 40],
+        'right-group': [50, 50]
+    }
 };
 
-const mergeWithDefaults = (stored: StoredSettings): TerminalSettings => ({
-    ...DEFAULT_SETTINGS,
-    ...stored,
-    tabs: DEFAULT_TABS.map((defTab) => {
-        const savedTab = stored.tabs?.find((t) => t.id === defTab.id);
-        return savedTab ? { ...defTab, enabled: savedTab.enabled } : defTab;
-    }),
-    panels: DEFAULT_PANELS.map((defPanel) => {
-        const savedPanel = stored.panels?.find((p) => p.id === defPanel.id);
-        return savedPanel ? { ...defPanel, enabled: savedPanel.enabled } : defPanel;
-    }),
-});
+const ACCENT_COLORS = {
+    emerald: { main: '#10b981', glow: 'rgba(16, 185, 129, 0.4)' },
+    blue: { main: '#3b82f6', glow: 'rgba(59, 130, 246, 0.4)' },
+    amber: { main: '#f59e0b', glow: 'rgba(245, 158, 11, 0.4)' },
+    purple: { main: '#8b5cf6', glow: 'rgba(139, 92, 246, 0.4)' },
+};
+
+const mergeWithDefaults = (stored: StoredSettings): TerminalSettings => {
+    // console.log("[TerminalSettings] Merging with defaults. Stored panelSizes:", stored.panelSizes);
+    return {
+        ...DEFAULT_SETTINGS,
+        ...stored,
+        tabs: DEFAULT_TABS.map((defTab: TabConfig) => {
+            const savedTab = stored.tabs?.find((t: any) => t.id === defTab.id);
+            return savedTab ? { ...defTab, enabled: savedTab.enabled } : defTab;
+        }),
+        panels: DEFAULT_PANELS.map((defPanel: PanelConfig) => {
+            const savedPanel = stored.panels?.find((p: any) => p.id === defPanel.id);
+            return savedPanel ? { ...defPanel, enabled: savedPanel.enabled } : defPanel;
+        }),
+        panelSizes: stored.panelSizes || DEFAULT_SETTINGS.panelSizes
+    };
+};
+
+const STORAGE_KEY = 'terminal_settings_v4';
 
 export function TerminalSettingsProvider({ children }: { children: React.ReactNode }) {
     const [settings, setSettings] = useState<TerminalSettings>(() => {
@@ -86,7 +115,7 @@ export function TerminalSettingsProvider({ children }: { children: React.ReactNo
             return DEFAULT_SETTINGS;
         }
 
-        const saved = localStorage.getItem('terminal_settings');
+        const saved = localStorage.getItem(STORAGE_KEY);
         if (!saved) {
             return DEFAULT_SETTINGS;
         }
@@ -102,8 +131,43 @@ export function TerminalSettingsProvider({ children }: { children: React.ReactNo
 
     // Save to localStorage on change
     useEffect(() => {
-        localStorage.setItem('terminal_settings', JSON.stringify(settings));
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('terminal_settings_v3', JSON.stringify(settings));
+
+            // Apply accent color to CSS variables
+            const colors = ACCENT_COLORS[settings.accentColor];
+            if (colors) {
+                document.documentElement.style.setProperty('--color-accent', colors.main);
+                document.documentElement.style.setProperty('--color-accent-glow', colors.glow);
+            }
+        }
     }, [settings]);
+
+    const [layouts, setLayouts] = useState<Record<string, TerminalSettings>>(() => {
+        if (typeof window === 'undefined') return {};
+        const saved = localStorage.getItem('terminal_layouts');
+        if (!saved) return {};
+        try {
+            return JSON.parse(saved);
+        } catch (e) {
+            console.error('Failed to parse terminal layouts', e);
+            return {};
+        }
+    });
+
+    const [currentLayoutName, setCurrentLayoutName] = useState<string>(() => {
+        if (typeof window === 'undefined') return 'Default';
+        return localStorage.getItem('terminal_current_layout') || 'Default';
+    });
+
+    // Save layouts to localStorage
+    useEffect(() => {
+        localStorage.setItem('terminal_layouts', JSON.stringify(layouts));
+    }, [layouts]);
+
+    useEffect(() => {
+        localStorage.setItem('terminal_current_layout', currentLayoutName);
+    }, [currentLayoutName]);
 
     const updateTabVisibility = (id: string, enabled: boolean) => {
         setSettings(prev => ({
@@ -131,6 +195,54 @@ export function TerminalSettingsProvider({ children }: { children: React.ReactNo
         setSettings(DEFAULT_SETTINGS);
     };
 
+    const updateAccentColor = (accentColor: TerminalSettings['accentColor']) => {
+        setSettings(prev => ({ ...prev, accentColor }));
+    };
+
+    const layoutUpdateTimer = useRef<NodeJS.Timeout | null>(null);
+
+    const updatePanelSizes = (groupId: string, sizes: any) => {
+        if (layoutUpdateTimer.current) clearTimeout(layoutUpdateTimer.current);
+
+        layoutUpdateTimer.current = setTimeout(() => {
+            setSettings(prev => ({
+                ...prev,
+                panelSizes: {
+                    ...prev.panelSizes,
+                    [groupId]: sizes
+                }
+            }));
+        }, 500); // Debounce to 500ms for stability
+    };
+
+    const saveLayout = (name: string) => {
+        setLayouts(prev => ({
+            ...prev,
+            [name]: settings
+        }));
+        setCurrentLayoutName(name);
+    };
+
+    const loadLayout = (name: string) => {
+        const layout = layouts[name];
+        if (layout) {
+            setSettings(layout);
+            setCurrentLayoutName(name);
+        }
+    };
+
+    const deleteLayout = (name: string) => {
+        if (name === 'Default') return;
+        setLayouts(prev => {
+            const next = { ...prev };
+            delete next[name];
+            return next;
+        });
+        if (currentLayoutName === name) {
+            setCurrentLayoutName('Default');
+        }
+    };
+
     return (
         <TerminalSettingsContext.Provider value={{
             settings,
@@ -138,7 +250,14 @@ export function TerminalSettingsProvider({ children }: { children: React.ReactNo
             updatePanelVisibility,
             updateTheme,
             toggleAutoPilot,
-            resetSettings
+            resetSettings,
+            updateAccentColor,
+            updatePanelSizes,
+            saveLayout,
+            loadLayout,
+            deleteLayout,
+            currentLayoutName,
+            layouts
         }}>
             {children}
         </TerminalSettingsContext.Provider>

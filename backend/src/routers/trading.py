@@ -160,6 +160,8 @@ async def get_trading_tokens(request: Request):
                     cache = (getattr(aggregator, "data_cache", {}) or {}).get(symbol, {}) or {}
                     price = float(cache.get("price", 0) or 0)
                     volume = float(row.get("day_ntl_vlm", 0) or 0)
+                    prev_day_px = float(row.get("prev_day_px", 0) or 0)
+                    change_24h = ((price - prev_day_px) / prev_day_px * 100.0) if prev_day_px > 0 else 0.0
                     raw_oi = float(cache.get("oi", 0) or 0)
                     oi_notional = raw_oi * price if price > 0 else raw_oi
                     tokens.append(
@@ -169,8 +171,8 @@ async def get_trading_tokens(request: Request):
                             "name": symbol,
                             "type": "perp",
                             "price": price,
-                            "prevPrice": price,
-                            "change24h": 0.0,
+                            "prevPrice": prev_day_px,
+                            "change24h": change_24h,
                             "volume24h": volume,
                             "openInterest": oi_notional,
                             "funding": float(cache.get("funding", 0) or 0),

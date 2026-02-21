@@ -193,6 +193,13 @@ class UserBalanceWebSocket:
             except Exception as e:
                 logger.error(f"WS error: {e}. Reconnecting in 5s...")
                 await asyncio.sleep(5)
+            finally:
+                if self._ws:
+                    await self._ws.close()
+                    self._ws = None
+                if self._session:
+                    await self._session.close()
+                    self._session = None
             
             # Brief delay before reconnecting
             if self._running:

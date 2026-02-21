@@ -88,13 +88,18 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
         return () => clearInterval(interval);
     }, [symbol, token, isAuthenticated]);
 
-    const formatDollar = (value: number) => {
-        if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-        if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
-        return `$${value.toFixed(0)}`;
+    const formatDollar = (value: any) => {
+        const num = Number(value);
+        if (isNaN(num)) return '$0';
+        if (Math.abs(num) >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
+        if (Math.abs(num) >= 1_000) return `$${(num / 1_000).toFixed(0)}K`;
+        return `$${num.toFixed(0)}`;
     };
 
-    const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+    const formatAddress = (addr: any) => {
+        if (!addr || typeof addr !== 'string') return '0x000...0000';
+        return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+    };
 
     const formatTimeRemaining = (started: number, duration: number) => {
         const elapsed = (Date.now() - started) / 60000;
@@ -106,9 +111,18 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
 
     const metrics = useMemo(() => {
         if (!summary) return null;
-        const total = summary.buyVolume + summary.sellVolume;
-        const buyRatio = total > 0 ? (summary.buyVolume / total) * 100 : 50;
-        return { ...summary, buyRatio, sellRatio: 100 - buyRatio, totalVolume: total };
+        const buyVolume = summary.buyVolume || 0;
+        const sellVolume = summary.sellVolume || 0;
+        const total = buyVolume + sellVolume;
+        const buyRatio = total > 0 ? (buyVolume / total) * 100 : 50;
+        return {
+            ...summary,
+            buyVolume,
+            sellVolume,
+            buyRatio,
+            sellRatio: 100 - buyRatio,
+            totalVolume: total
+        };
     }, [summary]);
 
     const buyOrders = orders.filter(o => o.side === 'buy');
@@ -116,19 +130,19 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
 
     if (loading) {
         return (
-            <div className="h-full flex flex-col items-center justify-center bg-[var(--background)]">
-                <RefreshCw className="w-5 h-5 text-[var(--color-primary)] animate-spin" />
+            <div className="h-full flex flex-col items-center justify-center bg-[#050505]">
+                <RefreshCw className="w-5 h-5 text-[#3b82f6] animate-spin" />
                 <span className="text-[10px] text-gray-500 mt-2">Scanning TWAPs...</span>
             </div>
         );
     }
 
     return (
-        <div className="h-full flex flex-col bg-[var(--background)] overflow-hidden">
+        <div className="h-full flex flex-col bg-[#050505] overflow-hidden">
             {/* Compact Header */}
-            <div className="flex items-center justify-between px-3 py-2 bg-[var(--background)]/60 border-b border-[var(--glass-border)] shrink-0">
+            <div className="flex items-center justify-between px-3 py-2 bg-[#050505]/60 border-b border-[rgba(255,255,255,0.05)] shrink-0">
                 <div className="flex items-center gap-2">
-                    <Activity className="w-3.5 h-3.5 text-[var(--color-primary)]" />
+                    <Activity className="w-3.5 h-3.5 text-[#3b82f6]" />
                     <span className="text-[9px] font-black uppercase text-gray-400">TWAP Intel</span>
                     <span className="text-[8px] text-gray-600">• {symbol}</span>
                 </div>
@@ -142,21 +156,21 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
             {/* Quick Summary Bar */}
             {metrics && metrics.activeCount > 0 && (
                 <div className={`px-3 py-2 border-b flex items-center justify-between ${metrics.sentiment === 'distributing'
-                    ? 'bg-[var(--color-bearish)]/10 border-[var(--color-bearish)]/20'
+                    ? 'bg-[#ef4444]/10 border-[#ef4444]/20'
                     : metrics.sentiment === 'accumulating'
-                        ? 'bg-[var(--color-bullish)]/10 border-[var(--color-bullish)]/20'
-                        : 'bg-white/5 border-[var(--glass-border)]'
+                        ? 'bg-[#10b981]/10 border-[#10b981]/20'
+                        : 'bg-white/5 border-[rgba(255,255,255,0.05)]'
                     }`}>
                     <div className="flex items-center gap-2">
                         {metrics.sentiment === 'distributing' ? (
-                            <ArrowDown className="w-4 h-4 text-[var(--color-bearish)]" />
+                            <ArrowDown className="w-4 h-4 text-[#ef4444]" />
                         ) : metrics.sentiment === 'accumulating' ? (
-                            <ArrowUp className="w-4 h-4 text-[var(--color-bullish)]" />
+                            <ArrowUp className="w-4 h-4 text-[#10b981]" />
                         ) : (
                             <Activity className="w-4 h-4 text-gray-400" />
                         )}
-                        <span className={`text-xs font-bold uppercase ${metrics.sentiment === 'distributing' ? 'text-[var(--color-bearish)]' :
-                            metrics.sentiment === 'accumulating' ? 'text-[var(--color-bullish)]' : 'text-gray-400'
+                        <span className={`text-xs font-bold uppercase ${metrics.sentiment === 'distributing' ? 'text-[#ef4444]' :
+                            metrics.sentiment === 'accumulating' ? 'text-[#10b981]' : 'text-gray-400'
                             }`}>
                             {metrics.sentiment === 'distributing' ? 'SELLING' :
                                 metrics.sentiment === 'accumulating' ? 'BUYING' : 'BALANCED'}
@@ -165,7 +179,7 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                             {metrics.activeCount} active
                         </span>
                     </div>
-                    <div className={`text-sm font-black font-mono ${metrics.netDelta > 0 ? 'text-[var(--color-bullish)]' : metrics.netDelta < 0 ? 'text-[var(--color-bearish)]' : 'text-gray-300'
+                    <div className={`text-sm font-black font-mono ${metrics.netDelta > 0 ? 'text-[#10b981]' : metrics.netDelta < 0 ? 'text-[#ef4444]' : 'text-gray-300'
                         }`}>
                         {metrics.netDelta > 0 ? '+' : ''}{formatDollar(metrics.netDelta)}
                     </div>
@@ -180,15 +194,15 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                         <span className="text-[10px]">No active TWAPs for {symbol}</span>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-2 gap-px bg-[var(--glass-border)]/20">
+                    <div className="grid grid-cols-2 gap-px bg-[rgba(255,255,255,0.05)]/20">
                         {/* BUYERS Column */}
-                        <div className="bg-[var(--background)]">
-                            <div className="sticky top-0 bg-[var(--color-bullish)]/10 px-2 py-1.5 border-b border-[var(--color-bullish)]/20 flex items-center justify-between">
+                        <div className="bg-[#050505]">
+                            <div className="sticky top-0 bg-[#10b981]/10 px-2 py-1.5 border-b border-[#10b981]/20 flex items-center justify-between">
                                 <div className="flex items-center gap-1.5">
-                                    <TrendingUp className="w-3 h-3 text-[var(--color-bullish)]" />
-                                    <span className="text-[9px] font-black text-[var(--color-bullish)]">BUYERS</span>
+                                    <TrendingUp className="w-3 h-3 text-[#10b981]" />
+                                    <span className="text-[9px] font-black text-[#10b981]">BUYERS</span>
                                 </div>
-                                <span className="text-[8px] text-[var(--color-bullish)]/60 font-mono">
+                                <span className="text-[8px] text-[#10b981]/60 font-mono">
                                     {buyOrders.length} • {formatDollar(metrics?.buyVolume || 0)}
                                 </span>
                             </div>
@@ -199,7 +213,7 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                                     buyOrders.map((order, i) => (
                                         <div
                                             key={order.hash || i}
-                                            className="bg-[var(--color-bullish)]/5 border border-[var(--color-bullish)]/10 rounded px-2 py-1.5 hover:border-[var(--color-bullish)]/30 transition-all"
+                                            className="bg-[#10b981]/5 border border-[#10b981]/10 rounded px-2 py-1.5 hover:border-[#10b981]/30 transition-all"
                                         >
                                             <div className="flex items-center justify-between mb-1">
                                                 <code className="text-[8px] text-gray-500 font-mono">
@@ -217,7 +231,7 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                                                 )}
                                             </div>
                                             <div className="flex items-center justify-between">
-                                                <span className="text-[10px] font-bold text-[var(--color-bullish)] font-mono">
+                                                <span className="text-[10px] font-bold text-[#10b981] font-mono">
                                                     {formatDollar(order.size)}
                                                 </span>
                                                 <div className="flex items-center gap-1 text-[8px] text-gray-500">
@@ -228,7 +242,7 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                                             {/* Progress bar */}
                                             <div className="mt-1 h-1 bg-black/30 rounded-full overflow-hidden">
                                                 <div
-                                                    className="h-full bg-[var(--color-bullish)]/50"
+                                                    className="h-full bg-[#10b981]/50"
                                                     style={{ width: `${order.progress}%` }}
                                                 />
                                             </div>
@@ -239,13 +253,13 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                         </div>
 
                         {/* SELLERS Column */}
-                        <div className="bg-[var(--background)]">
-                            <div className="sticky top-0 bg-[var(--color-bearish)]/10 px-2 py-1.5 border-b border-[var(--color-bearish)]/20 flex items-center justify-between">
+                        <div className="bg-[#050505]">
+                            <div className="sticky top-0 bg-[#ef4444]/10 px-2 py-1.5 border-b border-[#ef4444]/20 flex items-center justify-between">
                                 <div className="flex items-center gap-1.5">
-                                    <TrendingDown className="w-3 h-3 text-[var(--color-bearish)]" />
-                                    <span className="text-[9px] font-black text-[var(--color-bearish)]">SELLERS</span>
+                                    <TrendingDown className="w-3 h-3 text-[#ef4444]" />
+                                    <span className="text-[9px] font-black text-[#ef4444]">SELLERS</span>
                                 </div>
-                                <span className="text-[8px] text-[var(--color-bearish)]/60 font-mono">
+                                <span className="text-[8px] text-[#ef4444]/60 font-mono">
                                     {sellOrders.length} • {formatDollar(metrics?.sellVolume || 0)}
                                 </span>
                             </div>
@@ -256,7 +270,7 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                                     sellOrders.map((order, i) => (
                                         <div
                                             key={order.hash || i}
-                                            className="bg-[var(--color-bearish)]/5 border border-[var(--color-bearish)]/10 rounded px-2 py-1.5 hover:border-[var(--color-bearish)]/30 transition-all"
+                                            className="bg-[#ef4444]/5 border border-[#ef4444]/10 rounded px-2 py-1.5 hover:border-[#ef4444]/30 transition-all"
                                         >
                                             <div className="flex items-center justify-between mb-1">
                                                 <code className="text-[8px] text-gray-500 font-mono">
@@ -274,7 +288,7 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                                                 )}
                                             </div>
                                             <div className="flex items-center justify-between">
-                                                <span className="text-[10px] font-bold text-[var(--color-bearish)] font-mono">
+                                                <span className="text-[10px] font-bold text-[#ef4444] font-mono">
                                                     {formatDollar(order.size)}
                                                 </span>
                                                 <div className="flex items-center gap-1 text-[8px] text-gray-500">
@@ -285,7 +299,7 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
                                             {/* Progress bar */}
                                             <div className="mt-1 h-1 bg-black/30 rounded-full overflow-hidden">
                                                 <div
-                                                    className="h-full bg-[var(--color-bearish)]/50"
+                                                    className="h-full bg-[#ef4444]/50"
                                                     style={{ width: `${order.progress}%` }}
                                                 />
                                             </div>
@@ -299,7 +313,7 @@ export default function TwapIntelligence({ symbol, compact = false }: TwapIntell
             </div>
 
             {/* Data Source Footer */}
-            <div className="px-3 py-1.5 border-t border-[var(--glass-border)] bg-[var(--background)]/40 flex items-center justify-between shrink-0">
+            <div className="px-3 py-1.5 border-t border-[rgba(255,255,255,0.05)] bg-[#050505]/40 flex items-center justify-between shrink-0">
                 <span className="text-[8px] text-gray-600">Source: HypurrScan</span>
                 <span className="text-[8px] text-gray-600">
                     Total: {formatDollar((metrics?.buyVolume || 0) + (metrics?.sellVolume || 0))}

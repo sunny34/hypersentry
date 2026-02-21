@@ -36,7 +36,7 @@ const ExecutionPlanPanel = () => {
                         {plan.direction && (
                             <div>
                                 <div className="text-gray-500 uppercase text-[10px]">Direction</div>
-                                <div className={`font-bold ${plan.direction === 'BUY' ? 'text-green-500' : 'text-red-500'}`}>
+                                <div className={`font-bold ${plan.direction === 'BUY' ? 'text-emerald-500' : 'text-red-500'}`}>
                                     {plan.direction}
                                 </div>
                             </div>

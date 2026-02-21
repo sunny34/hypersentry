@@ -55,6 +55,19 @@ class VolatilityDetector:
         else:
             vol_ratio = 1.0
         
+        # 3. Realized Volatility Calculation
+        returns = []
+        for i in range(1, len(price_history)):
+            prev = price_history[i-1]
+            curr = price_history[i]
+            if prev > 0:
+                returns.append((curr - prev) / prev)
+        
+        import statistics
+        realized_vol = 0.02 # Fallback
+        if len(returns) >= 2:
+            realized_vol = float(statistics.pstdev(returns))
+        
         # Scoring Logic: 
         # Lower range_ratio (< 1) and lower vol_ratio (< 1) = Higher Compression Score.
         comp_score = (max(0, 1 - range_ratio) + max(0, 1 - vol_ratio)) / 2.0
@@ -70,5 +83,6 @@ class VolatilityDetector:
             
         return {
             "volatility_regime": regime,
-            "compression_score": round(float(comp_score), 2)
+            "compression_score": round(float(comp_score), 2),
+            "realized_vol": round(float(max(0.001, realized_vol)), 6)
         }

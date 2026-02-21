@@ -267,10 +267,44 @@ class WhaleTracker:
                     "volume": float(all_time.get("vlm", 0)),
                 })
             
-            # Sort by all-time PnL descending, take top N
-            parsed_traders.sort(key=lambda x: x["allTimePnl"], reverse=True)
+            # ── Filter out Market Makers ──
+            # MMs have extremely high volume relative to PnL (earning rebates, not alpha)
+            # Smart directional traders have higher ROI per unit of volume
+            smart_traders = []
+            for t in parsed_traders:
+                pnl = abs(t["allTimePnl"]) if t["allTimePnl"] != 0 else 1
+                volume = t["volume"] if t["volume"] > 0 else 1
+                volume_to_pnl = volume / pnl
+                
+                # MM heuristics:
+                # 1. Volume > 100x PnL → almost certainly MM (rebate farming)
+                # 2. Very low absolute ROI despite huge volume → systematic MM
+                is_likely_mm = (
+                    volume_to_pnl > 100 or
+                    (volume > 50_000_000 and abs(t["roi"]) < 0.05)
+                )
+                
+                if is_likely_mm:
+                    logger.debug(f"Filtered MM: {t['address'][:10]}... vol/pnl={volume_to_pnl:.0f}x, roi={t['roi']:.2%}")
+                    continue
+                
+                # Smart trader composite score:
+                # 40% ROI (alpha efficiency), 30% recent performance, 30% all-time PnL
+                account_value = t["accountValue"]
+                roi_score = min(t["roi"], 5.0) / 5.0  # cap at 500% ROI
+                recent_score = (t["weekPnl"] + t["monthPnl"]) / max(account_value, 1)
+                recent_score = max(0, min(recent_score, 2.0)) / 2.0
+                pnl_score = min(t["allTimePnl"], 10_000_000) / 10_000_000
+                
+                t["smart_score"] = (roi_score * 0.4) + (recent_score * 0.3) + (pnl_score * 0.3)
+                smart_traders.append(t)
             
-            for i, trader in enumerate(parsed_traders[:self.max_whales]):
+            logger.info(f"🐋 Filtered {len(parsed_traders) - len(smart_traders)} likely MMs, {len(smart_traders)} smart traders remain")
+            
+            # Sort by smart_score descending (not raw PnL)
+            smart_traders.sort(key=lambda x: x["smart_score"], reverse=True)
+            
+            for i, trader in enumerate(smart_traders[:self.max_whales]):
                 address = trader["address"]
                 pnl = trader["allTimePnl"]
                 display_name = trader["displayName"]
@@ -291,7 +325,7 @@ class WhaleTracker:
                 
                 self.whales[address] = profile
             
-            logger.info(f"🐋 Loaded {len(self.whales)} whales from leaderboard (top by all-time PnL)")
+            logger.info(f"🐋 Loaded {len(self.whales)} smart traders from leaderboard (MM-filtered, scored by alpha)")
             if self.whales:
                 top_whale = list(self.whales.values())[0]
                 logger.info(f"🐋 #1: {top_whale.label} — ${top_whale.pnl:,.0f} PnL, ${top_whale.account_value:,.0f} AV")

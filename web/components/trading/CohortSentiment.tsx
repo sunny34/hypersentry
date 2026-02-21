@@ -45,100 +45,41 @@ export default function CohortSentiment({ symbol }: CohortSentimentProps) {
     const [mode, setMode] = useState<'pnl' | 'size'>('pnl');
     const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
     const [dataSource, setDataSource] = useState<'live' | 'simulated'>('simulated');
-    const generateSimulatedDataRef = useRef<() => void>(() => {});
+    const generateSimulatedDataRef = useRef<() => void>(() => { });
 
-    // Fetch real leaderboard data
+    // Fetch real cohort sentiment data
     const fetchLeaderboardData = useCallback(async () => {
         try {
-            // Try to get real leaderboard data
-            const res = await axios.get(`${API_URL}/market/leaderboard?limit=100`);
+            setLoading(true);
+            const res = await axios.get(`${API_URL}/market/cohort_sentiment?symbol=${symbol}`);
 
-            if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+            if (res.data && res.data.source === 'live' && Array.isArray(res.data.cohorts)) {
                 setDataSource('live');
-
-                // Analyze cohorts from real data
-                const traders = res.data;
-
-                // Segment by PnL tiers
-                const extremelyProfitable = traders.filter((t: any) => t.pnl > 1000000);
-                const veryProfitable = traders.filter((t: any) => t.pnl > 100000 && t.pnl <= 1000000);
-                const profitable = traders.filter((t: any) => t.pnl > 0 && t.pnl <= 100000);
-                const rekt = traders.filter((t: any) => t.pnl < 0);
-
-                // Calculate sentiment based on recent positions
-                const calcSentiment = (group: any[]): CohortData['sentiment'] => {
-                    if (group.length === 0) return 'neutral';
-                    const longs = group.filter((t: any) => t.recentSide === 'long').length;
-                    const ratio = longs / group.length;
-                    if (ratio > 0.7) return 'very_bullish';
-                    if (ratio > 0.55) return 'bullish';
-                    if (ratio < 0.3) return 'very_bearish';
-                    if (ratio < 0.45) return 'bearish';
-                    return 'neutral';
-                };
-
-                const calcNetFlow = (group: any[]): number => {
-                    return group.reduce((sum: number, t: any) => {
-                        const val = t.recentVolume || 0;
-                        return sum + (t.recentSide === 'long' ? val : -val);
-                    }, 0);
-                };
-
-                const pnlCohorts: CohortData[] = [
-                    {
-                        name: 'Extremely Profitable',
-                        sentiment: calcSentiment(extremelyProfitable),
-                        netFlow: calcNetFlow(extremelyProfitable),
-                        volume: extremelyProfitable.reduce((s: number, t: any) => s + (t.volume || 0), 0),
-                        traders: extremelyProfitable.length,
-                        avgPnl: extremelyProfitable.length > 0 ? extremelyProfitable.reduce((s: number, t: any) => s + t.pnl, 0) / extremelyProfitable.length : 0,
-                        sparkline: generateSparkline(extremelyProfitable.length > 0 ? 0.7 : 0.5),
-                        icon: '👑'
-                    },
-                    {
-                        name: 'Very Profitable',
-                        sentiment: calcSentiment(veryProfitable),
-                        netFlow: calcNetFlow(veryProfitable),
-                        volume: veryProfitable.reduce((s: number, t: any) => s + (t.volume || 0), 0),
-                        traders: veryProfitable.length,
-                        avgPnl: veryProfitable.length > 0 ? veryProfitable.reduce((s: number, t: any) => s + t.pnl, 0) / veryProfitable.length : 0,
-                        sparkline: generateSparkline(0.6),
-                        icon: '💎'
-                    },
-                    {
-                        name: 'Profitable',
-                        sentiment: calcSentiment(profitable),
-                        netFlow: calcNetFlow(profitable),
-                        volume: profitable.reduce((s: number, t: any) => s + (t.volume || 0), 0),
-                        traders: profitable.length,
-                        avgPnl: profitable.length > 0 ? profitable.reduce((s: number, t: any) => s + t.pnl, 0) / profitable.length : 0,
-                        sparkline: generateSparkline(0.55),
-                        icon: '📈'
-                    },
-                    {
-                        name: 'Underwater',
-                        sentiment: calcSentiment(rekt),
-                        netFlow: calcNetFlow(rekt),
-                        volume: rekt.reduce((s: number, t: any) => s + (t.volume || 0), 0),
-                        traders: rekt.length,
-                        avgPnl: rekt.length > 0 ? rekt.reduce((s: number, t: any) => s + t.pnl, 0) / rekt.length : 0,
-                        sparkline: generateSparkline(0.35),
-                        icon: '💀'
-                    },
-                ];
-
-                setCohorts(pnlCohorts);
-                setTopTraders(traders.slice(0, 5).map((t: any) => ({
-                    address: t.address,
-                    pnl: t.pnl,
-                    volume: t.volume,
-                    winRate: t.winRate || 0,
-                    recentTrade: t.recentTrade
+                setCohorts(res.data.cohorts.map((c: any) => ({
+                    ...c,
+                    sparkline: generateSparkline(c.sentiment.includes('bullish') ? 0.7 : 0.3)
                 })));
+
+                // Fetch general leaderboard for top traders list since cohort_sentiment is focused on aggregates
+                try {
+                    const lbRes = await axios.get(`${API_URL}/market/leaderboard?limit=5`);
+                    if (lbRes.data && Array.isArray(lbRes.data)) {
+                        setTopTraders(lbRes.data.map((t: any) => ({
+                            address: t.address,
+                            pnl: t.pnl,
+                            volume: t.volume,
+                            winRate: t.winRate || 0,
+                            recentTrade: t.recentTrade
+                        })));
+                    }
+                } catch (lbErr) {
+                    console.warn("Failed to fetch top traders leaderboard:", lbErr);
+                }
             } else {
-                throw new Error('No data');
+                throw new Error('No live data available');
             }
         } catch (e) {
+            console.error("Failed to fetch cohort sentiment:", e);
             // Fall back to simulated data
             setDataSource('simulated');
             generateSimulatedDataRef.current();
@@ -146,7 +87,7 @@ export default function CohortSentiment({ symbol }: CohortSentimentProps) {
             setLoading(false);
             setLastUpdate(new Date());
         }
-    }, []);
+    }, [symbol]);
 
     const generateSparkline = (bias: number): number[] => {
         const points: number[] = [];
@@ -262,7 +203,7 @@ export default function CohortSentiment({ symbol }: CohortSentimentProps) {
     const getSentimentColor = (sentiment: CohortData['sentiment']) => {
         switch (sentiment) {
             case 'very_bullish': return 'text-emerald-400 bg-emerald-500/20 border-emerald-500/40';
-            case 'bullish': return 'text-green-400 bg-green-500/15 border-green-500/30';
+            case 'bullish': return 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30';
             case 'neutral': return 'text-gray-400 bg-gray-500/15 border-gray-500/30';
             case 'bearish': return 'text-orange-400 bg-orange-500/15 border-orange-500/30';
             case 'very_bearish': return 'text-red-400 bg-red-500/20 border-red-500/40';

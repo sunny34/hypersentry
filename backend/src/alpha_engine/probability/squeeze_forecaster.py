@@ -11,8 +11,7 @@ class SqueezeForecaster:
         symbol: str, 
         p_up: float, 
         p_down: float, 
-        avg_up_move: float = 0.012, 
-        avg_down_move: float = 0.012,
+        realized_vol: float = 0.012,
         quality: float = 0.0,
         timestamp: int = 0
     ) -> ProbabilityResult:
@@ -21,7 +20,8 @@ class SqueezeForecaster:
         intensity = p_up - p_down
         
         # Expected Move: Probabilistic expectation of return magnitude
-        expected_move = (p_up * avg_up_move) - (p_down * avg_down_move)
+        # We use realized_vol as the base move size for the selected time horizon
+        expected_move = intensity * realized_vol
 
         return ProbabilityResult(
             symbol=symbol,

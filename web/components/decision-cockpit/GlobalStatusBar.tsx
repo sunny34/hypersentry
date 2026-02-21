@@ -33,7 +33,7 @@ const GlobalStatusBar = () => {
         ? convictionValues.reduce((sum, item) => sum + item.score, 0) / convictionValues.length
         : 50;
     const dailyPnlProxy = ((avgConviction - 50) / 50) * (deployedPct / 100) * 2;
-    const pnlColor = dailyPnlProxy > 0 ? 'text-green-400' : dailyPnlProxy < 0 ? 'text-red-400' : 'text-gray-400';
+    const pnlColor = dailyPnlProxy > 0 ? 'text-emerald-400' : dailyPnlProxy < 0 ? 'text-red-400' : 'text-gray-400';
     useEffect(() => {
         const id = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(id);
@@ -49,14 +49,14 @@ const GlobalStatusBar = () => {
     }, [stream.connected, streamLagMs]);
 
     const streamColor =
-        derivedStreamStatus === 'live' ? 'text-green-400' :
+        derivedStreamStatus === 'live' ? 'text-emerald-400' :
             derivedStreamStatus === 'degraded' ? 'text-yellow-400' :
                 derivedStreamStatus === 'stale' ? 'text-red-500' :
                     'text-gray-500';
 
     const getRegimeColor = (r: string) => {
         if (r === 'SQUEEZE_ENVIRONMENT') return 'text-cyan-400';
-        if (r === 'TRENDING_HIGH_VOL') return 'text-green-400';
+        if (r === 'TRENDING_HIGH_VOL') return 'text-emerald-400';
         if (r === 'CRISIS_MODE') return 'text-red-500 animate-pulse';
         return 'text-gray-400';
     };
@@ -92,7 +92,7 @@ const GlobalStatusBar = () => {
 
                         <div className="flex items-center space-x-2 shrink-0">
                             <span className="text-gray-500">Health:</span>
-                            <span className={`font-bold ${health === 'OPTIMAL' ? 'text-green-400' : 'text-yellow-500'}`}>
+                            <span className={`font-bold ${health === 'OPTIMAL' ? 'text-emerald-400' : 'text-yellow-500'}`}>
                                 {health}
                             </span>
                         </div>

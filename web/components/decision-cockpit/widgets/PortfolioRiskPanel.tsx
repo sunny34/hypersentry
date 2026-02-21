@@ -43,7 +43,7 @@ const PortfolioRiskPanel = () => {
                     </div>
                     <div className="border border-gray-800 bg-black/40 p-3 rounded">
                         <div className="text-[10px] uppercase text-gray-500">Bias</div>
-                        <div className={`font-bold ${conviction?.bias === 'LONG' ? 'text-green-500' : conviction?.bias === 'SHORT' ? 'text-red-500' : 'text-gray-400'}`}>
+                        <div className={`font-bold ${conviction?.bias === 'LONG' ? 'text-emerald-500' : conviction?.bias === 'SHORT' ? 'text-red-500' : 'text-gray-400'}`}>
                             {conviction?.bias || 'NEUTRAL'}
                         </div>
                     </div>
@@ -71,7 +71,7 @@ const PortfolioRiskPanel = () => {
                     </div>
                     <div className="border border-green-900/50 bg-green-950/20 p-2 rounded text-center">
                         <div className="text-[9px] uppercase text-gray-500">Take Profit</div>
-                        <div className="text-green-400 text-xs font-bold">${takeProfit.toFixed(2)}</div>
+                        <div className="text-emerald-400 text-xs font-bold">${takeProfit.toFixed(2)}</div>
                     </div>
                 </div>
                 )}
@@ -82,7 +82,7 @@ const PortfolioRiskPanel = () => {
                     </div>
                     <div className="w-full h-1 bg-gray-800 rounded overflow-hidden">
                         <div
-                            className={`h-full ${expectedImpact > 8 ? 'bg-red-500' : expectedImpact > 4 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                            className={`h-full ${expectedImpact > 8 ? 'bg-red-500' : expectedImpact > 4 ? 'bg-yellow-500' : 'bg-emerald-500'}`}
                             style={{ width: `${Math.min(100, expectedImpact * 5)}%` }}
                         />
                     </div>

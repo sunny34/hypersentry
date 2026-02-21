@@ -82,6 +82,98 @@ async def get_liquidations(
         return _liquidations_cache["data"][:limit] if _liquidations_cache["data"] else []
 
 
+@router.get("/cohort_sentiment")
+async def get_cohort_sentiment(
+    request: Request,
+    symbol: str = "BTC"
+):
+    """
+    Get cohort-based sentiment for a specific symbol using real WhaleTracker data.
+    """
+    whale_tracker = getattr(request.app.state, "whale_tracker", None)
+    if not whale_tracker:
+        return {"error": "Whale tracker not initialized", "source": "simulated"}
+
+    symbol = symbol.upper()
+    positions = whale_tracker.get_whale_positions()
+    
+    # Filter for the specific symbol
+    symbol_positions = [p for p in positions if p["coin"].upper() == symbol]
+    
+    # Group whales by their total PnL
+    # Extremely Profitable: > $1M
+    # Very Profitable: $100K - $1M
+    # Profitable: $0 - $100K
+    # Underwater: < $0
+    
+    cohorts = {
+        "extremely_profitable": [],
+        "very_profitable": [],
+        "profitable": [],
+        "underwater": []
+    }
+    
+    for pos in symbol_positions:
+        pnl = pos.get("totalPnl", 0)
+        if pnl > 1000000:
+            cohorts["extremely_profitable"].append(pos)
+        elif pnl > 100000:
+            cohorts["very_profitable"].append(pos)
+        elif pnl > 0:
+            cohorts["profitable"].append(pos)
+        else:
+            cohorts["underwater"].append(pos)
+            
+    def process_cohort(name, data):
+        if not data:
+            return {
+                "name": name,
+                "sentiment": "neutral",
+                "netFlow": 0,
+                "volume": 0,
+                "traders": 0,
+                "avgPnl": 0,
+                "icon": ""
+            }
+        
+        longs = sum(1 for p in data if p["side"] == "long")
+        shorts = sum(1 for p in data if p["side"] == "short")
+        ratio = longs / len(data) if data else 0.5
+        
+        sentiment = "neutral"
+        if ratio > 0.7: sentiment = "very_bullish"
+        elif ratio > 0.55: sentiment = "bullish"
+        elif ratio < 0.3: sentiment = "very_bearish"
+        elif ratio < 0.45: sentiment = "bearish"
+        
+        net_flow = sum((p["notionalUsd"] if p["side"] == "long" else -p["notionalUsd"]) for p in data)
+        volume = sum(p["notionalUsd"] for p in data)
+        avg_pnl = sum(p["totalPnl"] for p in data) / len(data)
+        
+        return {
+            "name": name,
+            "sentiment": sentiment,
+            "netFlow": net_flow,
+            "volume": volume,
+            "traders": len(data),
+            "avgPnl": avg_pnl
+        }
+
+    results = [
+        {**process_cohort("Extremely Profitable", cohorts["extremely_profitable"]), "icon": "👑"},
+        {**process_cohort("Very Profitable", cohorts["very_profitable"]), "icon": "💎"},
+        {**process_cohort("Profitable", cohorts["profitable"]), "icon": "📈"},
+        {**process_cohort("Underwater", cohorts["underwater"]), "icon": "💀"}
+    ]
+    
+    return {
+        "symbol": symbol,
+        "cohorts": results,
+        "source": "live",
+        "timestamp": int(time.time() * 1000)
+    }
+
+
 @router.get("/leaderboard")
 async def get_leaderboard(
     request: Request,

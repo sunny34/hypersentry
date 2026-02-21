@@ -461,7 +461,7 @@ export default function LiquidationHeatmap({
                     <div className="text-[10px] text-gray-400 space-y-0.5">
                         <div>Price: <span className="text-white font-mono">${hoveredLevel.price.toFixed(2)}</span></div>
                         <div>Volume: <span className="text-white font-mono">{formatK(hoveredLevel.volume)}</span></div>
-                        <div>Risk: <span className={`font-bold ${hoveredLevel.riskLevel === 'extreme' ? 'text-red-400' : hoveredLevel.riskLevel === 'high' ? 'text-orange-400' : 'text-green-400'}`}>
+                        <div>Risk: <span className={`font-bold ${hoveredLevel.riskLevel === 'extreme' ? 'text-red-400' : hoveredLevel.riskLevel === 'high' ? 'text-orange-400' : 'text-emerald-400'}`}>
                             {hoveredLevel.riskLevel.toUpperCase()}
                         </span></div>
                     </div>

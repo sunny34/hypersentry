@@ -1,0 +1,93 @@
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/CompactRiskSimulator.tsx
+  42:35  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/CompactRiskSimulator.tsx:42:35
+  40 |
+  41 |     useEffect(() => {
+> 42 |         if (positions.length > 0) simulate();
+     |                                   ^^^^^^^^ Avoid calling setState() directly within an effect
+  43 |     }, [positions]);
+  44 |
+  45 |     return (  react-hooks/set-state-in-effect
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/LiquidationFirehose.tsx
+  7:1  error  Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free  @typescript-eslint/ban-ts-comment
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/NewsFeed.tsx
+  7:1  error  Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free  @typescript-eslint/ban-ts-comment
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/NewsTicker.tsx
+  84:9  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/NewsTicker.tsx:84:9
+  82 |
+  83 |     useEffect(() => {
+> 84 |         fetchNews();
+     |         ^^^^^^^^^ Avoid calling setState() directly within an effect
+  85 |         const interval = setInterval(fetchNews, 60000); // 1 min refresh for ticker
+  86 |         return () => clearInterval(interval);
+  87 |     }, [fetchNews]);  react-hooks/set-state-in-effect
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/ResizableLayout.tsx
+   3:1   error  Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free          @typescript-eslint/ban-ts-comment
+  64:49  error  React Hook "useState" is called conditionally. React Hooks must be called in the exact same order in every component render  react-hooks/rules-of-hooks
+  73:47  error  React Hook "useState" is called conditionally. React Hooks must be called in the exact same order in every component render  react-hooks/rules-of-hooks
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/StatusBar.tsx
+  71:17  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/Users/sunnyjain/Desktop/hypersentry/web/components/trading/StatusBar.tsx:71:17
+  69 |     // Calculate if any core token is stale (> 3s)
+  70 |     const MARKET_STALE_MS = 3000;
+> 71 |     const now = Date.now();
+     |                 ^^^^^^^^^^ Cannot call impure function
+  72 |     const isStale = btc?.timestamp ? (now - btc.timestamp > MARKET_STALE_MS) : false;
+  73 |
+  74 |     return (  react-hooks/purity
+
+/Users/sunnyjain/Desktop/hypersentry/web/hooks/useHyperliquidSession.ts
+  22:18  error  An interface declaring no members is equivalent to its supertype  @typescript-eslint/no-empty-object-type
+
+/Users/sunnyjain/Desktop/hypersentry/web/hooks/useSimplifiedAlpha.ts
+  51:48  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/Users/sunnyjain/Desktop/hypersentry/web/hooks/useSimplifiedAlpha.ts:51:48
+  49 |             reasoning: conviction.explanation?.join('. ') || 'No reasoning available',
+  50 |             source: 'conviction' as const,
+> 51 |             timestamp: conviction.timestamp || Date.now(),
+     |                                                ^^^^^^^^^^ Cannot call impure function
+  52 |         };
+  53 |     }, [symbol, conviction]);
+  54 |          react-hooks/purity
+  86:50  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/Users/sunnyjain/Desktop/hypersentry/web/hooks/useSimplifiedAlpha.ts:86:50
+  84 |                     reasoning: conv.explanation?.join('. ') || 'No reasoning',
+  85 |                     source: 'conviction' as const,
+> 86 |                     timestamp: conv.timestamp || Date.now(),
+     |                                                  ^^^^^^^^^^ Cannot call impure function
+  87 |                 };
+  88 |             }
+  89 |         });  react-hooks/purity
+
+✖ 11 problems (11 errors, 0 warnings)
+

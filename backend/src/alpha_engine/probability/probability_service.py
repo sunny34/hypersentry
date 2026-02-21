@@ -146,16 +146,20 @@ class ProbabilityService:
             self.training_metrics["down_auc"],
         )
 
-    async def get_probabilities(self, symbol: str) -> Optional["ProbabilityResult"]:
+    async def get_probabilities(self, symbol: str, realized_vol: float = 0.012) -> Optional["ProbabilityResult"]:
         # Local import avoids module-level circular dependency.
         from src.alpha_engine.services.conviction_service import conviction_service
 
         conviction = await conviction_service.get_conviction(symbol)
         if conviction is None:
             return None
-        return self.calculate_probabilities(conviction)
+        return self.calculate_probabilities(conviction, realized_vol)
         
-    def calculate_probabilities(self, conviction: 'ConvictionResult') -> Optional['ProbabilityResult']:
+    def calculate_probabilities(
+        self, 
+        conviction: 'ConvictionResult', 
+        realized_vol: float = 0.012
+    ) -> Optional['ProbabilityResult']:
         """
         Calculates directional probabilities based on the provided Conviction signal.
         """
@@ -165,8 +169,6 @@ class ProbabilityService:
         X = np.array([self._to_model_features(fv)], dtype=float)
         
         # 2. Inference
-        # Mock inference if models specific predict_proba not available or X shape mismatch
-        # For now we assume models are resilient or mocked
         p_up_raw = 0.5
         p_down_raw = 0.5
         
@@ -186,6 +188,13 @@ class ProbabilityService:
         p_up = float(self.upside_calibrator.calibrate(np.array([p_up_raw]))[0])
         p_down = float(self.downside_calibrator.calibrate(np.array([p_down_raw]))[0])
         
+        # If calibrated probabilities are flat (often happens with insufficient isotonic regression training)
+        # but we have a strong conviction score, blend the conviction back in as a heuristic edge.
+        if abs(p_up - p_down) < 0.01 and conviction.score != 50:
+            skew = (conviction.score - 50) / 200.0  # e.g. score 60 -> +0.05
+            p_up = min(0.99, max(0.01, p_up + skew))
+            p_down = min(0.99, max(0.01, p_down - skew))
+            
         quality = self._estimate_quality(p_up, p_down)
 
         # 4. Final Forecast
@@ -193,6 +202,7 @@ class ProbabilityService:
              symbol=conviction.symbol,
              p_up=p_up,
              p_down=p_down,
+             realized_vol=realized_vol,
              quality=quality,
              timestamp=conviction.timestamp
         )

@@ -158,7 +158,7 @@ const OpportunityTable = () => {
                     : 'OFFLINE';
 
     const streamColor = stream.status === 'live'
-        ? 'text-green-400'
+        ? 'text-emerald-400'
         : stream.status === 'degraded'
             ? 'text-yellow-400'
             : stream.status === 'stale'
@@ -177,7 +177,7 @@ const OpportunityTable = () => {
     }
 
     const getQualityBadge = (score: number) => {
-        if (score > 1.5) return <span className="px-1.5 py-0.5 rounded-sm bg-green-500/20 text-green-500 text-[8px] font-bold border border-green-500/30">HIGH EDGE</span>;
+        if (score > 1.5) return <span className="px-1.5 py-0.5 rounded-sm bg-emerald-500/20 text-emerald-500 text-[8px] font-bold border border-emerald-500/30">HIGH EDGE</span>;
         if (score > 0.5) return <span className="px-1.5 py-0.5 rounded-sm bg-blue-500/20 text-blue-500 text-[8px] font-bold border border-blue-500/30">LOW QUALITY</span>;
         return <span className="px-1.5 py-0.5 rounded-sm bg-gray-800 text-gray-500 text-[8px] font-bold border border-gray-700">NEUTRAL</span>;
     };
@@ -219,11 +219,11 @@ const OpportunityTable = () => {
                             <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] font-mono">
                                 <div>
                                     <div className="text-gray-600 uppercase">Edge</div>
-                                    <div className={item.edgeScore > 1 ? 'text-green-400' : 'text-gray-400'}>{item.edgeScore.toFixed(2)}</div>
+                                    <div className={item.edgeScore > 1 ? 'text-emerald-400' : 'text-gray-400'}>{item.edgeScore.toFixed(2)}</div>
                                 </div>
                                 <div>
                                     <div className="text-gray-600 uppercase">Conviction</div>
-                                    <div className={item.score > 60 ? 'text-green-500' : item.score < 40 ? 'text-red-500' : 'text-gray-400'}>{item.score}</div>
+                                    <div className={item.score > 60 ? 'text-emerald-500' : item.score < 40 ? 'text-red-500' : 'text-gray-400'}>{item.score}</div>
                                 </div>
                                 <div>
                                     <div className="text-gray-600 uppercase">Exp Move</div>
@@ -339,12 +339,12 @@ const OpportunityTable = () => {
                                     </td>
 
                                     <td className="px-3 sm:px-4 py-3 text-right">
-                                        <span className={item.edgeScore > 1 ? 'text-green-400' : 'text-gray-400'}>
+                                        <span className={item.edgeScore > 1 ? 'text-emerald-400' : 'text-gray-400'}>
                                             {item.edgeScore.toFixed(2)}
                                         </span>
                                     </td>
 
-                                    <td className={`px-3 sm:px-4 py-3 text-right font-bold ${item.score > 60 ? 'text-green-500' : item.score < 40 ? 'text-red-500' : 'text-gray-500'}`}>
+                                    <td className={`px-3 sm:px-4 py-3 text-right font-bold ${item.score > 60 ? 'text-emerald-500' : item.score < 40 ? 'text-red-500' : 'text-gray-500'}`}>
                                         {item.score}
                                     </td>
 

@@ -441,6 +441,9 @@ class AlphaService:
         symbol = symbol.upper()
         enriched = dict(data)
         
+        # Debug logger
+        logger.warning(f"update_market_state {symbol} keys: {list(enriched.keys())}")
+        
         # Handle liquidation events - pass directly, state store will accumulate in its own cache
         if "liquidation_event" in data:
             liq_event = data["liquidation_event"]
@@ -472,6 +475,7 @@ class AlphaService:
                  asyncio.create_task(self._safe_run_pipeline(symbol))
 
     async def _safe_run_pipeline(self, symbol: str):
+        logger.warning(f"_safe_run_pipeline Triggered for {symbol}")
         if symbol in self._running_symbols:
             return
         self._running_symbols.add(symbol)
@@ -741,6 +745,7 @@ class AlphaService:
     async def _run_pipeline(self, symbol: str):
         state = await global_state_store.get_state(symbol)
         if not state: return
+        logger.warning(f"_run_pipeline EXECUTION STARTED for {symbol}")
 
         # --- A. Signal Generation (Microstructure) ---
         
@@ -848,7 +853,7 @@ class AlphaService:
             current_equity = await self.get_current_equity()
             current_regime = gov_report.active_regime if isinstance(gov_report.active_regime, str) else "NORMAL_MARKET"
             
-            logger.info(f"=== RISK CALC: symbol={symbol}, direction={direction}, price={state.price}, equity={current_equity}, rr={dynamic_rr} ===")
+            logger.warning(f"=== RISK CALC: symbol={symbol}, direction={direction}, price={state.price}, equity={current_equity}, rr={dynamic_rr} ===")
             risk_data = risk_service.calculate_risk(
                 symbol=symbol,
                 direction=direction, # risk_service accepts LONG/SHORT
@@ -888,7 +893,7 @@ class AlphaService:
             )
             
             # Auto-execute trade if autonomous mode is enabled
-            logger.info(f"=== AUTO-EXEC CHECK: symbol={symbol}, bias={conviction.bias}, exec_plan={bool(exec_plan)}, risk_data={bool(risk_data)}, user_id={self._active_user_id} ===")
+            logger.warning(f"=== AUTO-EXEC CHECK: symbol={symbol}, bias={conviction.bias}, exec_plan={bool(exec_plan)}, risk_data={bool(risk_data)}, user_id={self._active_user_id} ===")
             if exec_plan and risk_data:
                 result = await self._check_and_execute_auto_trade(
                     symbol=symbol,
@@ -900,6 +905,10 @@ class AlphaService:
 
         # --- E. Broadcast to Frontend ---
 
+        footprint_dump = footprint_res.model_dump() if hasattr(footprint_res, "model_dump") else footprint_res.dict() if hasattr(footprint_res, "dict") else {}
+        liquidation_dump = liq_res.model_dump() if hasattr(liq_res, "model_dump") else liq_res.dict() if hasattr(liq_res, "dict") else {}
+
+        logger.warning(f"=== BROADCASTING ALPHA CONVICTION for {symbol} ===")
         # 1. Alpha Conviction (Radar)
         await self._publish_event(
             event_type="alpha_conviction",
@@ -915,6 +924,8 @@ class AlphaService:
                 "prob_down_1pct": probs.prob_down_1pct,
                 "realized_vol": vol_res.get("realized_vol", 0.02),
                 "explanation": conviction.explanation[:5] if conviction.explanation else [],
+                "footprint": footprint_dump,
+                "liquidation": liquidation_dump,
                 "timestamp": conviction.timestamp,
             },
         )

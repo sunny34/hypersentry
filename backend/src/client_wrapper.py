@@ -123,7 +123,7 @@ class HyperliquidClient:
 
         # Skip API calls for placeholder addresses
         if self._is_placeholder_value(address):
-            logger.warning(f"Skipping user state fetch for placeholder address: {address}")
+            logger.debug(f"Skipping fetch for placeholder address: {address}")
             return None
 
         now = time.time()
@@ -155,7 +155,7 @@ class HyperliquidClient:
         """
         # Skip API calls for placeholder addresses
         if self._is_placeholder_value(address):
-            logger.warning(f"Skipping open orders fetch for placeholder address: {address}")
+            logger.debug(f"Skipping open orders fetch for placeholder address: {address}")
             return None
 
         try:

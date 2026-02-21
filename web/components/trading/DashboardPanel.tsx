@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import PositionsTable from './PositionsTable';
+import { Shield } from 'lucide-react';
 
 interface DashboardPanelProps {
     isAuthenticated: boolean;
@@ -101,28 +102,14 @@ export default function DashboardPanel({
                             </div>
                         </div>
                         <div className="flex-1 p-6 flex flex-col items-center justify-center gap-6">
+                            <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-2">
+                                <Shield className="w-8 h-8 text-emerald-500/50" />
+                            </div>
                             <div className="text-center space-y-2">
-                                <h4 className="text-xl font-bold text-white">Connect to View Your Positions</h4>
+                                <h4 className="text-xl font-black text-white uppercase tracking-tight">Identity Unverified</h4>
                                 <p className="text-sm text-gray-400 max-w-xs mx-auto">
                                     Access your portfolio, active orders, and trade history securely via your wallet.
                                 </p>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4 w-full max-w-md">
-                                <div className="p-4 rounded-xl bg-white/5 border border-white/5 flex flex-col gap-2">
-                                    <span className="text-[10px] uppercase font-black text-gray-500">Top Gainer (24h)</span>
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-bold text-white">BTC</span>
-                                        <span className="text-emerald-400 font-mono font-bold">+4.2%</span>
-                                    </div>
-                                </div>
-                                <div className="p-4 rounded-xl bg-white/5 border border-white/5 flex flex-col gap-2">
-                                    <span className="text-[10px] uppercase font-black text-gray-500">Whale Activity</span>
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-bold text-white">High</span>
-                                        <span className="text-blue-400 font-mono font-bold">12 Alerts</span>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -198,24 +185,54 @@ export default function DashboardPanel({
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-800/50">
-                                            {openOrders.map((order, i) => (
-                                                <tr key={i} className="hover:bg-gray-800/30">
-                                                    <td className="px-4 py-3 font-bold">{order.coin}</td>
-                                                    <td className={`px-4 py-3 font-bold ${order.side === 'B' ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                        {order.side === 'B' ? 'BUY' : 'SELL'}
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right">{order.sz}</td>
-                                                    <td className="px-4 py-3 text-right">${parseFloat(order.limitPx).toLocaleString()}</td>
-                                                    <td className="px-4 py-3 text-right">
-                                                        <button
-                                                            onClick={() => onCancelOrder(order)}
-                                                            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-500 px-2 py-1 rounded"
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                            {openOrders.map((order, i) => {
+                                                const isStrategy = order.type === 'twap' || order.type === 'iceberg' || order.isStrategy;
+                                                const totalSize = parseFloat(order.origSz || order.sz);
+                                                const currentSize = parseFloat(order.sz);
+                                                const filledPercent = totalSize > 0 ? ((totalSize - currentSize) / totalSize) * 100 : 0;
+
+                                                return (
+                                                    <tr key={i} className="hover:bg-gray-800/30 group">
+                                                        <td className="px-4 py-3">
+                                                            <div className="flex flex-col">
+                                                                <span className="font-bold text-white">{order.coin}</span>
+                                                                {isStrategy && (
+                                                                    <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest px-1 py-0.5 rounded bg-blue-400/10 border border-blue-400/20 w-fit mt-1">
+                                                                        {order.type?.toUpperCase() || 'STRATEGY'}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className={`px-4 py-3 font-bold ${order.side === 'B' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                            {order.side === 'B' ? 'BUY' : 'SELL'}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-right">
+                                                            <div className="flex flex-col items-end gap-1">
+                                                                <span className="font-mono text-gray-200">{order.sz}</span>
+                                                                {isStrategy && (
+                                                                    <div className="w-24 h-1.5 bg-gray-800 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                                                                        <div
+                                                                            className="h-full bg-blue-500 transition-all duration-500"
+                                                                            style={{ width: `${filledPercent}%` }}
+                                                                        />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-right font-mono text-gray-300">
+                                                            ${parseFloat(order.limitPx).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-right">
+                                                            <button
+                                                                onClick={() => onCancelOrder(order)}
+                                                                className="text-[10px] bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-3 py-1.5 rounded-lg border border-red-500/20 transition-all font-black uppercase tracking-widest active:scale-95"
+                                                            >
+                                                                Kill
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 )}

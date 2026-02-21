@@ -87,7 +87,7 @@ const AutonomousLayout = () => {
                                 <span className="text-[10px] text-gray-500 uppercase">Avg Conviction</span>
                             </div>
                             <div className="bg-gray-950 border border-gray-800 rounded flex flex-col items-center justify-center">
-                                <span className="text-green-500 text-3xl font-black tracking-tighter">{activePlans}</span>
+                                <span className="text-emerald-500 text-3xl font-black tracking-tighter">{activePlans}</span>
                                 <span className="text-[10px] text-gray-500 uppercase">Active Plans</span>
                             </div>
                         </div>
@@ -106,7 +106,7 @@ const AutonomousLayout = () => {
                                 {topSignals.map(([symbol, signal]) => (
                                     <div key={symbol} className="flex justify-between">
                                         <span className="text-gray-500">{symbol}</span>
-                                        <span className={signal.score >= 60 ? 'text-green-500' : signal.score <= 40 ? 'text-red-500' : 'text-gray-400'}>
+                                        <span className={signal.score >= 60 ? 'text-emerald-500' : signal.score <= 40 ? 'text-red-500' : 'text-gray-400'}>
                                             {signal.score}
                                         </span>
                                     </div>

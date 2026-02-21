@@ -2,6 +2,7 @@
 import React from 'react';
 import { useAlphaStore } from '../../../store/useAlphaStore';
 import { useMarketStore } from '../../../store/useMarketStore';
+import { formatCompact } from '@/lib/formatters';
 
 const SignalBreakdown = () => {
     const activeSymbol = useAlphaStore((s) => s.activeSymbol || 'BTC');
@@ -10,19 +11,9 @@ const SignalBreakdown = () => {
     const stream = useAlphaStore((s) => s.stream);
     const market = useMarketStore((s) => s.marketData[activeSymbol]);
 
-    const formatCompact = (num: number) => {
-        const abs = Math.abs(num);
-        const sign = num < 0 ? '-' : '';
-        if (abs >= 1e12) return sign + (abs / 1e12).toFixed(2) + 'T';
-        if (abs >= 1e9) return sign + (abs / 1e9).toFixed(2) + 'B';
-        if (abs >= 1e6) return sign + (abs / 1e6).toFixed(2) + 'M';
-        if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1) + 'K';
-        return sign + abs.toFixed(0);
-    };
-
     const rows: Array<{ label: string; value: string; color?: string }> = conviction ? [
         { label: 'Symbol', value: activeSymbol, color: 'text-white' },
-        { label: 'Bias', value: conviction.bias, color: conviction.bias === 'LONG' ? 'text-green-500' : conviction.bias === 'SHORT' ? 'text-red-500' : 'text-gray-400' },
+        { label: 'Bias', value: conviction.bias, color: conviction.bias === 'LONG' ? 'text-emerald-500' : conviction.bias === 'SHORT' ? 'text-red-500' : 'text-gray-400' },
         { label: 'Score', value: `${conviction.score}` },
         { label: 'Prob Up', value: `${(conviction.prob_up_1pct * 100).toFixed(1)}%` },
         { label: 'Prob Down', value: `${(conviction.prob_down_1pct * 100).toFixed(1)}%` },
@@ -32,8 +23,8 @@ const SignalBreakdown = () => {
         { label: 'CVD (Spot 1m)', value: formatCompact(market?.external_spot?.cvd_spot_composite_1m ?? 0) },
         { label: 'OI', value: formatCompact(market?.oi ?? market?.external_oi?.open_interest ?? 0) },
         { label: 'Regime', value: governance?.active_regime || conviction.regime },
-        { label: 'Health', value: governance?.calibration_status || 'UNKNOWN', color: governance?.calibration_status === 'OPTIMAL' ? 'text-green-500' : 'text-yellow-500' },
-        { label: 'Stream', value: stream.status.toUpperCase(), color: stream.status === 'live' ? 'text-green-500' : stream.status === 'degraded' ? 'text-yellow-500' : 'text-red-500' }
+        { label: 'Health', value: governance?.calibration_status || 'UNKNOWN', color: governance?.calibration_status === 'OPTIMAL' ? 'text-emerald-500' : 'text-yellow-500' },
+        { label: 'Stream', value: stream.status.toUpperCase(), color: stream.status === 'live' ? 'text-emerald-500' : stream.status === 'degraded' ? 'text-yellow-500' : 'text-red-500' }
     ] : [];
 
     return (

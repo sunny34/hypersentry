@@ -101,17 +101,18 @@ class CryptofeedLiquidationService:
             logger.warning("⚠️ Cryptofeed: Could not add Binance Futures: %s", e)
 
         # --- Bybit ---
-        try:
-            from cryptofeed.exchanges import Bybit
-            fh.add_feed(Bybit(
-                symbols=symbols,
-                channels=[LIQUIDATIONS],
-                callbacks={LIQUIDATIONS: self._handle_liquidation},
-            ))
-            self._exchanges_connected.add("bybit")
-            logger.warning("✅ Cryptofeed: Bybit liquidation feed added")
-        except Exception as e:
-            logger.warning("⚠️ Cryptofeed: Could not add Bybit: %s", e)
+        # Temporarily disabled due to cryptofeed topic changes ('handler not found, topic:liquidation')
+        # try:
+        #     from cryptofeed.exchanges import Bybit
+        #     fh.add_feed(Bybit(
+        #         symbols=symbols,
+        #         channels=[LIQUIDATIONS],
+        #         callbacks={LIQUIDATIONS: self._handle_liquidation},
+        #     ))
+        #     self._exchanges_connected.add("bybit")
+        #     logger.warning("✅ Cryptofeed: Bybit liquidation feed added")
+        # except Exception as e:
+        #     logger.warning("⚠️ Cryptofeed: Could not add Bybit: %s", e)
 
         # --- OKX ---
         try:

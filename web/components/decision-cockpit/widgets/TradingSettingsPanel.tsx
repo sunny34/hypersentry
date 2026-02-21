@@ -59,11 +59,11 @@ const TradingSettingsPanel: React.FC<TradingSettingsPanelProps> = ({ isOpen, onC
 
                 <div className="p-4 space-y-6">
                     {/* Account Balance - Live from Hyperliquid */}
-                    <div className="bg-gradient-to-r from-green-950/30 to-blue-950/30 border border-green-500/20 rounded-lg p-4">
+                    <div className="bg-gradient-to-r from-green-950/30 to-blue-950/30 border border-emerald-500/20 rounded-lg p-4">
                         <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
-                                <Wallet className="w-4 h-4 text-green-400" />
-                                <span className="text-sm font-semibold text-green-400">Account Balance</span>
+                                <Wallet className="w-4 h-4 text-emerald-400" />
+                                <span className="text-sm font-semibold text-emerald-400">Account Balance</span>
                             </div>
                             <div className="flex items-center gap-2">
                                 {realtime && wsConnected && (
@@ -127,7 +127,7 @@ const TradingSettingsPanel: React.FC<TradingSettingsPanelProps> = ({ isOpen, onC
                                 <div className="text-xs text-gray-500">Total Exposure</div>
                             </div>
                             <div>
-                                <div className="text-xl font-bold text-green-400">${positionPreview.toFixed(0)}</div>
+                                <div className="text-xl font-bold text-emerald-400">${positionPreview.toFixed(0)}</div>
                                 <div className="text-xs text-gray-500">80% Conf. Size</div>
                             </div>
                         </div>
@@ -202,7 +202,7 @@ const TradingSettingsPanel: React.FC<TradingSettingsPanelProps> = ({ isOpen, onC
                                 className={`px-6 py-3 rounded-lg font-bold text-sm transition-all ${
                                     mode === 'autonomous' 
                                         ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/30' 
-                                        : 'bg-green-600 hover:bg-green-500 text-white shadow-lg shadow-green-900/30'
+                                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-green-900/30'
                                 }`}
                             >
                                 {mode === 'autonomous' ? 'DISABLE' : 'ENABLE'}

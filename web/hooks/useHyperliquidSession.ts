@@ -19,7 +19,7 @@ interface StoredAgentWallet {
     privateKey?: string;
 }
 
-export interface AgentWallet extends StoredAgentWallet {}
+export type AgentWallet = StoredAgentWallet;
 
 interface AgentSecret {
     address: string;
@@ -185,7 +185,7 @@ export const useHyperliquidSession = () => {
             setAgent(null);
             setIsAgentActive(false);
             setError(null);
-            return () => {};
+            return () => { };
         }
 
         // Validate ownership only when an active wallet address is present.
@@ -195,7 +195,7 @@ export const useHyperliquidSession = () => {
             setAgent(null);
             setIsAgentActive(false);
             setError(null);
-            return () => {};
+            return () => { };
         }
 
         const embeddedSecret: AgentSecret | null = stored.privateKey
@@ -223,7 +223,7 @@ export const useHyperliquidSession = () => {
         // Require session key for active trading.
         if (!hydratedAgent.privateKey) {
             setIsAgentActive(false);
-            return () => {};
+            return () => { };
         }
 
         // Local signing key present: treat as active immediately.
@@ -231,7 +231,7 @@ export const useHyperliquidSession = () => {
 
         const ownerAddress = (userAddress || stored.userAddress || '').toLowerCase();
         if (!ownerAddress) {
-            return () => {};
+            return () => { };
         }
 
         let cancelled = false;

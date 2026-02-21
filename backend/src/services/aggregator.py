@@ -115,7 +115,7 @@ class DataAggregator:
             cls._instance._binance_external_pending: Dict[int, str] = {}
             cls._instance._external_req_id = 1
             cls._instance.last_broadcast_time = 0
-            cls._instance.broadcast_interval = 0.2
+            cls._instance.broadcast_interval = 0.05  # 50ms for near-real-time book updates
         return cls._instance
 
     async def start(self):
@@ -265,12 +265,15 @@ class DataAggregator:
                 if not symbol:
                     continue
                 day_ntl_vlm = 0.0
+                prev_day_px = 0.0
                 if idx < len(contexts):
                     try:
                         day_ntl_vlm = float(contexts[idx].get("dayNtlVlm", 0.0) or 0.0)
+                        prev_day_px = float(contexts[idx].get("prevDayPx", 0.0) or 0.0)
                     except Exception:
                         day_ntl_vlm = 0.0
-                rows.append({"symbol": symbol, "index": idx, "day_ntl_vlm": day_ntl_vlm})
+                        prev_day_px = 0.0
+                rows.append({"symbol": symbol, "index": idx, "day_ntl_vlm": day_ntl_vlm, "prev_day_px": prev_day_px})
             rows.sort(key=lambda row: row["day_ntl_vlm"], reverse=True)
         except Exception as exc:
             if self._is_rate_limit_error(exc):
@@ -346,8 +349,10 @@ class DataAggregator:
         while True:
             try:
                 symbol, payload = await self.alpha_update_queue.get()
+                logger.info(f"Worker {worker_idx} got payload for {symbol}")
                 try:
                     await alpha_service.update_market_state(symbol, payload)
+                    logger.info(f"Worker {worker_idx} finished update_market_state for {symbol}")
                 except Exception:
                     logger.exception("Alpha update worker failed worker=%s symbol=%s", worker_idx, symbol)
                 finally:

@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { X, Settings, Layout, Eye, EyeOff, RotateCcw, Monitor, Laptop, Smartphone } from 'lucide-react';
+import { X, Settings, Layout, Eye, EyeOff, RotateCcw, Monitor, Laptop, Smartphone, Sparkles, Save, Plus, Trash2, Check } from 'lucide-react';
 import { useTerminalSettings } from '@/contexts/TerminalSettingsContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -10,7 +10,20 @@ interface TerminalSettingsModalProps {
 }
 
 export default function TerminalSettingsModal({ isOpen, onClose }: TerminalSettingsModalProps) {
-    const { settings, updateTabVisibility, updatePanelVisibility, resetSettings } = useTerminalSettings();
+    const {
+        settings,
+        updateTabVisibility,
+        updatePanelVisibility,
+        updateAccentColor,
+        resetSettings,
+        saveLayout,
+        loadLayout,
+        deleteLayout,
+        currentLayoutName,
+        layouts
+    } = useTerminalSettings();
+
+    const [newLayoutName, setNewLayoutName] = React.useState('');
 
     if (!isOpen) return null;
 
@@ -34,6 +47,37 @@ export default function TerminalSettingsModal({ isOpen, onClose }: TerminalSetti
 
                 {/* Content */}
                 <div className="p-6 space-y-8 max-h-[70vh] overflow-y-auto scrollbar-hide">
+                    {/* Theme Accents */}
+                    <section>
+                        <div className="flex items-center gap-2 mb-4">
+                            <Sparkles className="w-4 h-4 text-emerald-400" style={{ color: 'var(--color-accent)' }} />
+                            <h3 className="text-[11px] font-black uppercase tracking-wider text-gray-400">Terminal Accent</h3>
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                            {(['emerald', 'blue', 'amber', 'purple'] as const).map(color => (
+                                <button
+                                    key={color}
+                                    onClick={() => updateAccentColor(color)}
+                                    className={`h-12 rounded-xl border-2 transition-all relative overflow-hidden flex items-center justify-center ${settings.accentColor === color ? 'border-white/40 scale-105' : 'border-white/5 hover:border-white/20'}`}
+                                >
+                                    <div
+                                        className={`w-6 h-6 rounded-full shadow-lg ${color === 'emerald' ? 'bg-[#10b981]' :
+                                            color === 'blue' ? 'bg-[#3b82f6]' :
+                                                color === 'amber' ? 'bg-[#f59e0b]' :
+                                                    'bg-[#8b5cf6]'
+                                            }`}
+                                    />
+                                    {settings.accentColor === color && (
+                                        <motion.div
+                                            layoutId="accent-active"
+                                            className="absolute inset-0 bg-white/10"
+                                        />
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+                    </section>
+
                     {/* Console Hub Tabs */}
                     <section>
                         <div className="flex items-center gap-2 mb-4">
@@ -46,8 +90,8 @@ export default function TerminalSettingsModal({ isOpen, onClose }: TerminalSetti
                                     key={tab.id}
                                     onClick={() => updateTabVisibility(tab.id, !tab.enabled)}
                                     className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${tab.enabled
-                                            ? 'bg-white/[0.05] border-white/20'
-                                            : 'bg-white/[0.01] border-white/5 opacity-50'
+                                        ? 'bg-white/[0.05] border-white/20'
+                                        : 'bg-white/[0.01] border-white/5 opacity-50'
                                         }`}
                                 >
                                     <span className="text-xs font-bold text-white uppercase tracking-tight">{tab.label}</span>
@@ -58,6 +102,78 @@ export default function TerminalSettingsModal({ isOpen, onClose }: TerminalSetti
                                     )}
                                 </div>
                             ))}
+                        </div>
+                    </section>
+
+                    {/* Named Layouts */}
+                    <section>
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                                <Layout className="w-4 h-4 text-purple-400" />
+                                <h3 className="text-[11px] font-black uppercase tracking-wider text-gray-400">Workspace Layouts</h3>
+                            </div>
+                            <span className="text-[10px] font-bold text-gray-600 uppercase tracking-tighter">
+                                Active: <span className="text-white">{currentLayoutName}</span>
+                            </span>
+                        </div>
+
+                        <div className="space-y-3">
+                            {/* Save New Layout */}
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={newLayoutName}
+                                    onChange={(e) => setNewLayoutName(e.target.value)}
+                                    placeholder="Preset Name (e.g. Scalp)"
+                                    className="flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500/50"
+                                />
+                                <button
+                                    onClick={() => {
+                                        if (newLayoutName.trim()) {
+                                            saveLayout(newLayoutName.trim());
+                                            setNewLayoutName('');
+                                        }
+                                    }}
+                                    disabled={!newLayoutName.trim()}
+                                    className="bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 p-2 rounded-xl border border-purple-500/20 transition-all disabled:opacity-50"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            {/* Layout List */}
+                            <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto pr-2 scrollbar-hide">
+                                {Object.keys(layouts).map(name => (
+                                    <div
+                                        key={name}
+                                        className={`flex items-center justify-between p-3 rounded-xl border transition-all ${currentLayoutName === name
+                                            ? 'bg-purple-500/10 border-purple-500/30'
+                                            : 'bg-white/[0.01] border-white/5 hover:border-white/10'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            {currentLayoutName === name && <Check className="w-3 h-3 text-purple-400" />}
+                                            <span className={`text-xs font-bold ${currentLayoutName === name ? 'text-white' : 'text-gray-500'}`}>{name}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                onClick={() => loadLayout(name)}
+                                                className="px-2 py-1 text-[8px] font-black uppercase tracking-widest text-purple-400 hover:text-white transition-colors"
+                                            >
+                                                Load
+                                            </button>
+                                            {name !== 'Default' && (
+                                                <button
+                                                    onClick={() => deleteLayout(name)}
+                                                    className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+                                                >
+                                                    <Trash2 className="w-3 h-3" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </section>
 
@@ -73,8 +189,8 @@ export default function TerminalSettingsModal({ isOpen, onClose }: TerminalSetti
                                     key={panel.id}
                                     onClick={() => updatePanelVisibility(panel.id, !panel.enabled)}
                                     className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${panel.enabled
-                                            ? 'bg-white/[0.05] border-white/20'
-                                            : 'bg-white/[0.01] border-white/5 opacity-50'
+                                        ? 'bg-white/[0.05] border-white/20'
+                                        : 'bg-white/[0.01] border-white/5 opacity-50'
                                         }`}
                                 >
                                     <span className="text-xs font-bold text-white uppercase tracking-tight">{panel.label}</span>

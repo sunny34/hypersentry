@@ -8,10 +8,13 @@
     --background: #050505;
     --foreground: #ededed;
 
-    --color-primary: #10b981;
-    --color-primary-glow: rgba(16, 185, 129, 0.5);
+    --color-primary: var(--color-accent);
+    --color-primary-glow: var(--color-accent-glow);
 
-    /* Hyperdash-inspired accent colors */
+    /* Default Accent: Emerald */
+    --color-accent: #10b981;
+    --color-accent-glow: rgba(16, 185, 129, 0.4);
+
     --color-accent-blue: #3b82f6;
     --color-accent-orange: #f97316;
     --color-accent-teal: #14b8a6;
@@ -27,6 +30,61 @@
     --z-command: 150;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   THEME VARIANTS — matched by class on <html> via ThemeContext
+   ═══════════════════════════════════════════════════════════════ */
+
+/* HyperSentry Neon (default — same as :root) */
+.theme-neon {
+    --background: #050505;
+    --foreground: #ededed;
+    --color-accent: #10b981;
+    --color-accent-glow: rgba(16, 185, 129, 0.4);
+    --color-bullish: #10b981;
+    --color-bearish: #ef4444;
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-bg: rgba(20, 20, 20, 0.6);
+}
+
+/* Midnight Blue — deep professional tones */
+.theme-midnight {
+    --background: #0a0e1a;
+    --foreground: #e2e8f0;
+    --color-accent: #3b82f6;
+    --color-accent-glow: rgba(59, 130, 246, 0.4);
+    --color-accent-blue: #60a5fa;
+    --color-bullish: #22d3ee;
+    --color-bearish: #f87171;
+    --glass-border: rgba(99, 130, 255, 0.12);
+    --glass-bg: rgba(10, 14, 30, 0.7);
+}
+
+/* Stealth Grey — low-profile muted */
+.theme-stealth {
+    --background: #111111;
+    --foreground: #a0a0a0;
+    --color-accent: #737373;
+    --color-accent-glow: rgba(115, 115, 115, 0.3);
+    --color-accent-blue: #6b7280;
+    --color-bullish: #4ade80;
+    --color-bearish: #fb7185;
+    --glass-border: rgba(255, 255, 255, 0.05);
+    --glass-bg: rgba(17, 17, 17, 0.8);
+}
+
+/* Digital Matrix — retro hacker aesthetic */
+.theme-matrix {
+    --background: #020a02;
+    --foreground: #33ff33;
+    --color-accent: #00ff41;
+    --color-accent-glow: rgba(0, 255, 65, 0.35);
+    --color-accent-blue: #00e5ff;
+    --color-bullish: #00ff41;
+    --color-bearish: #ff003c;
+    --glass-border: rgba(0, 255, 65, 0.1);
+    --glass-bg: rgba(2, 10, 2, 0.75);
+}
+
 /* Base Styles */
 html {
     scroll-behavior: smooth;
@@ -36,6 +94,7 @@ body {
     color: var(--foreground);
     background: var(--background);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-variant-numeric: tabular-nums;
     overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -441,6 +500,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 /* Elite Glow Utility */
+.glow-accent {
+    box-shadow: 0 0 15px var(--color-accent-glow);
+}
+
 .glow-emerald {
     box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
 }

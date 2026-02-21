@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import axios from 'axios';
 import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw, Maximize2, Eye, EyeOff, Shield, Filter, Settings, Minimize2, ShieldAlert, Activity, BarChart3, Binary, Target, Zap, BrainCircuit } from 'lucide-react';
 import { ColorType, CrosshairMode, LineStyle, createChart, IChartApi, ISeriesApi, Time, UTCTimestamp, SeriesMarker } from 'lightweight-charts';
-import { useHyperliquidWS } from '../../hooks/useHyperliquidWS';
+import { useHyperliquidWS } from '@/contexts/HyperliquidWSContext';
 import { useMarketStore, LiquidityWall } from '../../store/useMarketStore';
 import { Indicators } from '../../utils/indicators';
 import LiquidationProfile from './LiquidationProfile';
@@ -427,7 +427,7 @@ function AdvancedChart({
         chart.priceScale('volume').applyOptions({
             scaleMargins: { top: 0.85, bottom: 0 },
             borderVisible: false,
-                visible: true,
+            visible: true,
         });
 
 

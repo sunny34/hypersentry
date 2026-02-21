@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { Shield, Zap, Target, TrendingUp, TrendingDown, AlertTriangle, ChevronRight } from 'lucide-react';
-import { useHyperliquidWS } from '../../hooks/useHyperliquidWS';
+import { useHyperliquidWS } from '@/contexts/HyperliquidWSContext';
 
 interface LiquidityLevel {
     price: number;

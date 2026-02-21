@@ -15,8 +15,8 @@ COPY web/package.json web/package-lock.json* ./
 # Install build dependencies for native modules
 RUN apk add --no-cache python3 make g++
 
-# Install dependencies
-RUN npm install
+# Install dependencies (use legacy-peer-deps for react-grid-layout under React 19)
+RUN npm install --legacy-peer-deps
 
 # ============================================
 # Build Stage

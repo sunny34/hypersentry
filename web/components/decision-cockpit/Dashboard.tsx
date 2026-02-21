@@ -1,7 +1,6 @@
 "use client";
 import { lazy, Suspense, memo } from 'react';
 import { Loader2 } from 'lucide-react';
-import { useAlphaStream } from '../../hooks/useAlphaStream';
 import { useAlphaAutonomousExecution } from '../../hooks/useAlphaAutonomousExecution';
 import GlobalStatusBar from './GlobalStatusBar';
 import { useModeStore } from '../../store/useModeStore';
@@ -22,8 +21,7 @@ const LayoutLoader = memo(() => (
 LayoutLoader.displayName = 'LayoutLoader';
 
 const Dashboard = () => {
-    // Start WebSocket Stream
-    useAlphaStream();
+    // Start autonomous execution loop
     useAlphaAutonomousExecution();
 
     const { mode } = useModeStore();
